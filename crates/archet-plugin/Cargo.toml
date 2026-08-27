@@ -1,0 +1,18 @@
+[package]
+name        = "archet-plugin"
+description = "Aethon Archet. VST3 / CLAP."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name       = "archet_plugin"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+nice-plug      = { workspace = true }
+nice-plug-egui = { workspace = true }
+archet          = { workspace = true }
+archet-ui       = { workspace = true }
+egui           = { workspace = true }
+serde_json     = { workspace = true }

@@ -1,0 +1,8 @@
+/target
+**/*.rs.bk
+*.wav
+*.vstpreset
+
+# Listening material produced by the research binaries. Renders are made to
+# be judged and thrown away, not kept in the history.
+renders/

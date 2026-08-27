@@ -1,0 +1,32 @@
+[package]
+name        = "archet"
+description = "TODO: one sentence saying what this instrument is and how it makes its sound."
+readme      = "../../README.md"
+keywords    = ["audio", "dsp", "synthesis"]
+categories  = ["multimedia::audio"]
+version.workspace    = true
+edition.workspace    = true
+license.workspace    = true
+authors.workspace    = true
+repository.workspace = true
+
+[lib]
+# Deliberately not a cdylib: the plugin crate is the shared object.
+crate-type = ["rlib"]
+
+[dependencies]
+serde = { workspace = true }
+# Opt into the shared crates this engine actually needs; the paths live in the
+# workspace manifest so the SDK switch is one edit there, never here.
+# aethon-dsp = { workspace = true }
+# aethon-rt  = { workspace = true }
+
+# There is no [features] table, and the absence is the contract. Cargo unifies
+# features across a resolved graph, so an optional `egui` here would be switched
+# on for the engine's OWN tests by any `cargo test --workspace`. Keeping the
+# editor in a separate crate is what makes "the engine never sees egui" true
+# rather than merely intended. Guard it:
+#   cargo tree -p archet --edges normal | grep -qE '^(egui|eframe|winit|wgpu)' && exit 1
+
+[dev-dependencies]
+serde_json = { workspace = true }

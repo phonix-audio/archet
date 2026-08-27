@@ -1,0 +1,13 @@
+[build]
+# target-cpu=x86-64-v3 enables AVX2, FMA, SSE4.2 — runs on any CPU from ~2013+
+# Change to "native" for max performance on your specific CPU (not portable)
+rustflags = ["-C", "target-cpu=x86-64-v3"]
+
+[env]
+# Debug `cargo test` spawns each test on a 2 MiB thread. Tests that build a full
+# engine and run process_audio overflow that in DEBUG builds: the deep call-tree
+# (engine -> voices -> insert FX -> mix) keeps large un-optimised frames that sum
+# past 2 MiB. Release inlines them away and passes fine, so this is a debug-build
+# test-ergonomics floor, not a runtime bug. Reserved (not committed) virtual
+# memory, so harmless for the app at runtime.
+RUST_MIN_STACK = "16777216"  # 16 MiB

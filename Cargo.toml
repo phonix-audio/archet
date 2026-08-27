@@ -1,0 +1,79 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/archet",
+    "crates/archet-ui",
+    "crates/archet-plugin",
+]
+
+# One place for everything the three crates share. `repository` in particular:
+# when these repositories move to a dedicated organisation, this is the single
+# line that changes.
+[workspace.package]
+version    = "0.1.0"
+edition    = "2021"
+license    = "MIT"
+authors    = ["Cyril Bonté"]
+repository = "https://github.com/cbonte/archet"
+
+[workspace.dependencies]
+archet    = { path = "crates/archet",    version = "0.1.0" }
+archet-ui = { path = "crates/archet-ui", version = "0.1.0" }
+
+# ── THE SDK SWITCH ────────────────────────────────────────────────────────
+# The seven shared crates are NOT published and there is no SDK repository yet,
+# so today they are path dependencies on the sibling aethon checkout. This
+# block is the ONLY place they are named: no member crate carries a path.
+#
+# The day the shared crates get a repository and tags, replace the seven lines
+# below with the git form and nothing else in this repository changes:
+#
+#   aethon-rt     = { git = "https://github.com/cbonte/aethon-sdk.git", tag = "v0.1.0" }
+#   aethon-dsp    = { git = "https://github.com/cbonte/aethon-sdk.git", tag = "v0.1.0" }
+#   ...
+#
+# Members opt in with `aethon-dsp = { workspace = true }`; the ones this
+# plugin does not use simply stay unreferenced here.
+aethon-rt     = { path = "../aethon/crates/aethon-rt" }
+aethon-dsp    = { path = "../aethon/crates/aethon-dsp" }
+aethon-data   = { path = "../aethon/crates/aethon-data" }
+aethon-ui     = { path = "../aethon/crates/aethon-ui" }
+aethon-fx     = { path = "../aethon/crates/aethon-fx" }
+aethon-fx-ui  = { path = "../aethon/crates/aethon-fx-ui" }
+aethon-preset = { path = "../aethon/crates/aethon-preset" }
+# ──────────────────────────────────────────────────────────────────────────
+
+serde      = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# The editor speaks plain `egui`, never `eframe`. `eframe::egui` is only a
+# re-export, so dropping eframe takes glow, winit, x11 and wayland out of the
+# graph with it, and the Windows cross-build stops having to dodge the
+# Linux-only backend features that aethon carries.
+egui        = "0.34"
+egui_extras = { version = "0.34", features = ["all_loaders"] }
+# Every declarative editor's spec tests parse the baked `.ron` themselves.
+ron         = "0.12"
+rfd         = "0.15"
+directories = "5.0"
+
+# Headless egui harness: AccessKit queries for behaviour, software-Vulkan
+# rendering (lavapipe) for image snapshots. Version must track egui.
+egui_kittest = { version = "0.34", features = ["wgpu", "snapshot"] }
+
+nice-plug      = { git = "https://codeberg.org/RustAudio/nice-plug.git", rev = "ea25d719f252d683cb39ffa05d9eabcc6dbb768c" }
+nice-plug-egui = { git = "https://codeberg.org/RustAudio/nice-plug.git", rev = "ea25d719f252d683cb39ffa05d9eabcc6dbb768c" }
+
+[profile.dev]
+opt-level   = 2
+incremental = true
+debug       = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
+[profile.release]
+opt-level     = 3
+lto           = "thin"
+codegen-units = 16
+strip         = "symbols"

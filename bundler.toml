@@ -1,0 +1,10 @@
+# Cargo package name -> the display name a host shows, and the name of the
+# bundle directory.
+#
+# "Aethon Archet" is FROZEN. It composes the preset directory Cubase's MediaBay
+# indexes (`<presets>/Aethon Audio/Aethon Archet/`), and it is the bundle name a host
+# resolves when it scans for the plugin. Renaming it orphans every
+# `.vstpreset` a user already has. See COMPAT.md.
+
+[archet-plugin]
+name = "Aethon Archet"

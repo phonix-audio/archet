@@ -1,0 +1,39 @@
+[package]
+name        = "archet-ui"
+description = "egui editor for the Aethon Archet engine."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+archet       = { workspace = true }
+egui        = { workspace = true }
+egui_extras = { workspace = true }
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+# aethon-ui = { workspace = true }   # the shared widget layer, if this editor uses it
+
+# Native Save/Load dialogs. Optional so a headless snapshot test, or a host that
+# owns preset I/O itself, drops the file-dialog and platform-dirs crates.
+rfd         = { workspace = true, optional = true }
+directories = { workspace = true, optional = true }
+
+[dev-dependencies]
+# The editor is judged by eye, so its tests render it: `snapshot` writes PNG
+# baselines under tests/snapshots and diffs against them, through software
+# Vulkan (lavapipe), no GPU required.
+egui_kittest = { workspace = true }
+
+[features]
+default      = ["disk-presets"]
+disk-presets = ["dep:rfd", "dep:directories", "dep:wayland-sys"]
+
+# `rfd` reaches wayland through `ashpd`, and without the `dlopen` feature that
+# crate's build script demands libwayland-client's pkg-config file at COMPILE
+# time, for a library this editor never calls directly. With it, wayland is
+# loaded at run time if it is present and ignored if it is not.
+[target.'cfg(target_os = "linux")'.dependencies]
+wayland-sys = { version = "0.31", features = ["dlopen"], optional = true }
