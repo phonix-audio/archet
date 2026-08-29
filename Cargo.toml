@@ -28,19 +28,19 @@ archet-ui = { path = "crates/archet-ui", version = "0.1.0" }
 # The day the shared crates get a repository and tags, replace the seven lines
 # below with the git form and nothing else in this repository changes:
 #
-#   aethon-rt     = { git = "https://github.com/cbonte/aethon-sdk.git", tag = "v0.1.0" }
-#   aethon-dsp    = { git = "https://github.com/cbonte/aethon-sdk.git", tag = "v0.1.0" }
+#   phonix-rt     = { git = "https://github.com/cbonte/aethon-sdk.git", tag = "v0.1.0" }
+#   phonix-dsp    = { git = "https://github.com/cbonte/aethon-sdk.git", tag = "v0.1.0" }
 #   ...
 #
-# Members opt in with `aethon-dsp = { workspace = true }`; the ones this
+# Members opt in with `phonix-dsp = { workspace = true }`; the ones this
 # plugin does not use simply stay unreferenced here.
-aethon-rt     = { path = "../aethon/crates/aethon-rt" }
-aethon-dsp    = { path = "../aethon/crates/aethon-dsp" }
-aethon-data   = { path = "../aethon/crates/aethon-data" }
-aethon-ui     = { path = "../aethon/crates/aethon-ui" }
-aethon-fx     = { path = "../aethon/crates/aethon-fx" }
-aethon-fx-ui  = { path = "../aethon/crates/aethon-fx-ui" }
-aethon-preset = { path = "../aethon/crates/aethon-preset" }
+phonix-rt     = { path = "../aethon/crates/phonix-rt" }
+phonix-dsp    = { path = "../aethon/crates/phonix-dsp" }
+phonix-data   = { path = "../aethon/crates/phonix-data" }
+phonix-ui     = { path = "../aethon/crates/phonix-ui" }
+phonix-fx     = { path = "../aethon/crates/phonix-fx" }
+phonix-fx-ui  = { path = "../aethon/crates/phonix-fx-ui" }
+phonix-preset = { path = "../aethon/crates/phonix-preset" }
 # ──────────────────────────────────────────────────────────────────────────
 
 serde      = { version = "1.0", features = ["derive"] }

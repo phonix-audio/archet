@@ -1,67 +1,42 @@
-//! Aethon Archet — the engine.
+//! Archet — bowed-strings physical-model engine (violin / viola / cello / bass).
 //!
-//! TODO(extraction): move the DSP here from aethon/src/... . The engine's
-//! contract is that it never sees egui and never sees a plugin framework: it
-//! takes a sample rate, a patch and MIDI, and fills a buffer.
+//! A dedicated digital-waveguide bowed string with a procedural modal *body*
+//! filter — the element that turns a bare string (spectrally an organ/reed) into
+//! a recognizable violin. Built from the acoustics literature (CCRMA / IRCAM /
+//! Woodhouse); see the per-module docs and the plan's Sources for citations.
+//!
+//! Signal flow per voice:
+//!   bow -> [friction junction] -> transverse + torsional waveguide -> bridge
+//!   force -> [modal body filter] -> radiated sound.
 
-use serde::{Deserialize, Serialize};
+pub mod body;
+pub mod engine;
+pub mod friction;
+pub mod harpsichord;
+pub mod modal;
+pub mod patch;
+pub mod section;
+pub mod string;
+pub mod sympathetic;
+pub mod voice;
 
-/// Everything the editor edits and the host persists.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct ArchetPatch {
-    pub name: String,
-    pub gain: f32,
-}
+pub use engine::{ArchetCommand, ArchetEngine, ArchetMeterState};
+pub use patch::ArchetPatch;
 
-impl Default for ArchetPatch {
-    fn default() -> Self {
-        Self { name: "Init".to_string(), gain: 0.9 }
-    }
-}
-
-/// The factory bank. Order is a compatibility surface: a host stores a preset
-/// as an index. See COMPAT.md.
-pub fn factory_presets() -> Vec<ArchetPatch> {
-    vec![ArchetPatch::default()]
-}
-
-pub struct ArchetEngine {
-    sample_rate: f32,
-    patch: ArchetPatch,
-}
-
-impl ArchetEngine {
-    pub fn new(sample_rate: f32) -> Self {
-        Self { sample_rate, patch: ArchetPatch::default() }
-    }
-
-    pub fn set_sample_rate(&mut self, sample_rate: f32) {
-        self.sample_rate = sample_rate;
-    }
-
-    pub fn sample_rate(&self) -> f32 { self.sample_rate }
-
-    pub fn set_patch(&mut self, patch: ArchetPatch) { self.patch = patch; }
-    pub fn patch(&self) -> &ArchetPatch { &self.patch }
-
-    pub fn note_on(&mut self, _note: u8, _velocity: u8) {}
-    pub fn note_off(&mut self, _note: u8) {}
-    pub fn all_notes_off(&mut self) {}
-
-    /// Interleaved, `channels` wide. Additive into `out`, like every other
-    /// engine in the family.
-    pub fn process_audio(&mut self, _out: &mut [f32], _channels: usize) {}
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_default_patch_round_trips_through_serde() {
-        let p = ArchetPatch::default();
-        let s = serde_json::to_string(&p).unwrap();
-        assert_eq!(serde_json::from_str::<ArchetPatch>(&s).unwrap(), p);
-    }
-}
+// ── The shared crates, under the module names the engine source uses ───────
+//
+// The engine came out of the monolith reaching `crate::dsp::filters` and
+// `crate::sequencer::state_buffer`. Re-exporting the shared crates under those
+// names is what lets the DSP move byte-for-byte: two lines here instead of a
+// sed over every call site, which is also what makes "the golden hash is
+// unchanged" a claim rather than a hope.
+//
+// NEVER copy shared DSP in here to make the crate look self-contained. The
+// only thing Archet takes from `phonix-dsp` is `filters::BiquadT` (the modal
+// body's biquad); the bowed-string physical model itself — the friction
+// junction, the waveguide, the modal body, the sympathetic strings, the
+// harpsichord soundboard and the section diffuser — has no counterpart in the
+// SDK and moved here untouched. `grep -ril 'karplus\|waveguide\|bowed\|friction'`
+// over `crates/` finds nothing of the kind in `phonix-dsp`.
+pub use phonix_dsp as dsp;
+pub use phonix_rt as state_buffer;

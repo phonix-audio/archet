@@ -9,17 +9,20 @@ license.workspace = true
 crate-type = ["rlib"]
 
 [dependencies]
-archet       = { workspace = true }
+archet      = { workspace = true }
 egui        = { workspace = true }
 egui_extras = { workspace = true }
 serde       = { workspace = true }
 serde_json  = { workspace = true }
-# aethon-ui = { workspace = true }   # the shared widget layer, if this editor uses it
+phonix-ui    = { workspace = true }   # icons, colors, widgets, keyboard, ui_spec, preset picker/io
+phonix-fx-ui = { workspace = true }   # the FX tab: `fx_rack` + the standalone `fx_host`
+# The editor's three spec tests parse the baked `ui_specs/archet.ron` themselves.
+ron          = { workspace = true }
 
-# Native Save/Load dialogs. Optional so a headless snapshot test, or a host that
-# owns preset I/O itself, drops the file-dialog and platform-dirs crates.
-rfd         = { workspace = true, optional = true }
-directories = { workspace = true, optional = true }
+# No `rfd` / `directories` here, and no `[features]` table. This editor has no
+# file dialog of its own: its Save/Load buttons call `phonix_ui::preset_io`, and
+# `phonix-ui` declares both crates unconditionally. Declaring them again would
+# say something false about this crate and would not change the resolved graph.
 
 [dev-dependencies]
 # The editor is judged by eye, so its tests render it: `snapshot` writes PNG
@@ -27,13 +30,9 @@ directories = { workspace = true, optional = true }
 # Vulkan (lavapipe), no GPU required.
 egui_kittest = { workspace = true }
 
-[features]
-default      = ["disk-presets"]
-disk-presets = ["dep:rfd", "dep:directories", "dep:wayland-sys"]
-
 # `rfd` reaches wayland through `ashpd`, and without the `dlopen` feature that
 # crate's build script demands libwayland-client's pkg-config file at COMPILE
-# time, for a library this editor never calls directly. With it, wayland is
-# loaded at run time if it is present and ignored if it is not.
+# time, for a library nothing here calls directly. `phonix-ui` pulls rfd in, so
+# the shim is needed even though the dialogs are not this crate's.
 [target.'cfg(target_os = "linux")'.dependencies]
-wayland-sys = { version = "0.31", features = ["dlopen"], optional = true }
+wayland-sys = { version = "0.31", features = ["dlopen"] }

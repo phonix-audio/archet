@@ -16,3 +16,4 @@ archet          = { workspace = true }
 archet-ui       = { workspace = true }
 egui           = { workspace = true }
 serde_json     = { workspace = true }
+phonix-preset  = { workspace = true }   # the `.vstpreset` writer + the `Preset` trait

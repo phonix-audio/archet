@@ -1,6 +1,6 @@
 [package]
 name        = "archet"
-description = "TODO: one sentence saying what this instrument is and how it makes its sound."
+description = "Aethon Archet — a bowed-string physical model (violin / viola / cello / double bass) with a procedural modal body, plus a plucked harpsichord voice."
 readme      = "../../README.md"
 keywords    = ["audio", "dsp", "synthesis"]
 categories  = ["multimedia::audio"]
@@ -18,8 +18,9 @@ crate-type = ["rlib"]
 serde = { workspace = true }
 # Opt into the shared crates this engine actually needs; the paths live in the
 # workspace manifest so the SDK switch is one edit there, never here.
-# aethon-dsp = { workspace = true }
-# aethon-rt  = { workspace = true }
+phonix-dsp    = { workspace = true }   # filters::BiquadT — the modal body's biquad
+phonix-rt     = { workspace = true }   # the lock-free meter channel
+phonix-preset = { workspace = true }   # the `Preset` trait ArchetPatch implements
 
 # There is no [features] table, and the absence is the contract. Cargo unifies
 # features across a resolved graph, so an optional `egui` here would be switched
