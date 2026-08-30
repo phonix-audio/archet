@@ -37,9 +37,3 @@ they get a repository and tags, that block is the only edit.
 `COMPAT.md` lists what cannot change: the VST3 class id, the parameter ids,
 the patch's serde field names and their defaults, and the factory bank's names
 *and order*.
-
-## History
-
-Extracted from the [aethon](https://github.com/cbonte/aethon) DAW, where it was
-a built-in track engine. aethon now loads it as an ordinary scanned VST3, like
-any third-party plugin.

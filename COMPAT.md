@@ -11,8 +11,6 @@ tests exist because a comment alone loses to a rename.
     Plugin NAME     Aethon Archet
     Plugin VENDOR   Aethon Audio
 
-Lifted from the aethon monolith: yes.
-
 The class id goes into every exported DAWproject `Vst3Plugin` device and into
 the header of every `.vstpreset`. NAME and VENDOR compose the preset directory
 Cubase's MediaBay indexes. Change any of them and existing projects and preset
@@ -26,8 +24,8 @@ Test: `archet-plugin`, `frozen_identifiers`.
 
 ## Parameter ids and persistence keys
 
-TODO: list every `#[id = "..."]` and `#[persist = "..."]` moved over from the
-monolith. A host stores automation against the id string.
+TODO: list every `#[id = "..."]` and `#[persist = "..."]`. A host stores
+automation against the id string.
 
 ## Patch serde field names and defaults
 
