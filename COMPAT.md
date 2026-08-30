@@ -6,7 +6,7 @@ tests exist because a comment alone loses to a rename.
 
 ## Identifiers a host resolves the plugin by
 
-    VST3 class id   VxArchetBow00001            (16 ASCII bytes, exactly)
+    VST3 class id   PxArchetBow00001            (16 ASCII bytes, exactly)
     CLAP id         com.aethon-audio.archet
     Plugin NAME     Aethon Archet
     Plugin VENDOR   Aethon Audio

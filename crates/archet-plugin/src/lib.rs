@@ -312,7 +312,7 @@ fn map_patch_to_nih_params(patch: &ArchetPatch) -> Vec<(&'static str, ParamValue
 
 fn generate_vstpreset_files() {
     let presets = ArchetPatch::factory_presets();
-    let class_id = b"VxArchetBow00001";
+    let class_id = b"PxArchetBow00001";
     let version = env!("CARGO_PKG_VERSION");
 
     let mapped: Vec<(String, Vec<(&str, ParamValue)>)> = presets
@@ -507,7 +507,7 @@ impl ClapPlugin for ArchetPlugin {
 // ── VST3 ──────────────────────────────────────────────────────────────────
 
 impl Vst3Plugin for ArchetPlugin {
-    const VST3_CLASS_ID: [u8; 16] = *b"VxArchetBow00001";
+    const VST3_CLASS_ID: [u8; 16] = *b"PxArchetBow00001";
     const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] = &[
         Vst3SubCategory::Instrument,
         Vst3SubCategory::Synth,
@@ -537,14 +537,14 @@ mod frozen_identifiers {
         assert_eq!(<ArchetPlugin as Plugin>::NAME, "Aethon Archet");
         assert_eq!(<ArchetPlugin as Plugin>::VENDOR, "Aethon Audio");
         assert_eq!(<ArchetPlugin as ClapPlugin>::CLAP_ID, "com.aethon-audio.archet");
-        assert_eq!(&<ArchetPlugin as Vst3Plugin>::VST3_CLASS_ID, b"VxArchetBow00001");
+        assert_eq!(&<ArchetPlugin as Vst3Plugin>::VST3_CLASS_ID, b"PxArchetBow00001");
     }
 
     /// The `.vstpreset` writer must use the very same class id as the plugin,
     /// or a generated bank is invisible to the host that scanned the plugin.
     #[test]
     fn the_vstpreset_writer_uses_the_plugins_class_id() {
-        assert_eq!(b"VxArchetBow00001", &<ArchetPlugin as Vst3Plugin>::VST3_CLASS_ID);
+        assert_eq!(b"PxArchetBow00001", &<ArchetPlugin as Vst3Plugin>::VST3_CLASS_ID);
     }
 
     /// The window the plugin declares is the one the editor is laid out
