@@ -1,4 +1,4 @@
-//! Aethon Archet — Bowed-String / Harpsichord Physical Model VST3/CLAP plugin
+//! Archet — Bowed-String / Harpsichord Physical Model VST3/CLAP plugin
 //!
 //! Wraps the ArchetEngine in a nice-plug Plugin.
 //! No audio input — stereo synth output only. MIDI input for notes + pitch bend.
@@ -330,18 +330,18 @@ fn generate_vstpreset_files() {
         .collect();
 
     match vstpreset::generate_factory_presets(
-        "Aethon Audio", "Aethon Archet", class_id, version, &preset_refs,
+        "Phonix Audio", "Archet", class_id, version, &preset_refs,
     ) {
-        Ok(count) => nice_log!("Aethon Archet: generated {} .vstpreset files", count),
-        Err(e)    => nice_log!("Aethon Archet: FAILED to generate .vstpreset files: {}", e),
+        Ok(count) => nice_log!("Archet: generated {} .vstpreset files", count),
+        Err(e)    => nice_log!("Archet: FAILED to generate .vstpreset files: {}", e),
     }
 }
 
 // ── Plugin implementation ─────────────────────────────────────────────────
 
 impl Plugin for ArchetPlugin {
-    const NAME:    &'static str = "Aethon Archet";
-    const VENDOR:  &'static str = "Aethon Audio";
+    const NAME:    &'static str = "Archet";
+    const VENDOR:  &'static str = "Phonix Audio";
     const URL:     &'static str = "";
     const EMAIL:   &'static str = "";
     const VERSION: &'static str = env!("CARGO_PKG_VERSION");
@@ -493,7 +493,7 @@ impl Plugin for ArchetPlugin {
 // ── CLAP ──────────────────────────────────────────────────────────────────
 
 impl ClapPlugin for ArchetPlugin {
-    const CLAP_ID: &'static str = "com.aethon-audio.archet";
+    const CLAP_ID: &'static str = "com.phonix-audio.archet";
     const CLAP_DESCRIPTION: Option<&'static str> = Some("Bowed-String / Harpsichord Physical Model");
     const CLAP_MANUAL_URL: Option<&'static str> = None;
     const CLAP_SUPPORT_URL: Option<&'static str> = None;
@@ -524,19 +524,19 @@ nice_export_vst3!(ArchetPlugin);
 // Cubase's MediaBay indexes. Changing one orphans every preset and session that
 // points at this plugin. The in-monolith version of this test compared the
 // class id against `phonix_preset::devices::plugin_for_engine(&EngineTag::Archet)`;
-// that dependency ran plugin -> aethon and now runs the other way, and the
+// that dependency ran plugin -> phonix and now runs the other way, and the
 // `EngineTag::Archet` variant is gone. So both sides assert the same literals
 // instead, and a drift still fails a build — just two builds instead of one
-// (aethon's `the_extracted_class_ids_are_the_plugins_own` is the other half).
+// (the sequencer's `the_extracted_class_ids_are_the_plugins_own` is the other half).
 #[cfg(test)]
 mod frozen_identifiers {
     use super::*;
 
     #[test]
     fn the_four_identifiers_are_frozen() {
-        assert_eq!(<ArchetPlugin as Plugin>::NAME, "Aethon Archet");
-        assert_eq!(<ArchetPlugin as Plugin>::VENDOR, "Aethon Audio");
-        assert_eq!(<ArchetPlugin as ClapPlugin>::CLAP_ID, "com.aethon-audio.archet");
+        assert_eq!(<ArchetPlugin as Plugin>::NAME, "Archet");
+        assert_eq!(<ArchetPlugin as Plugin>::VENDOR, "Phonix Audio");
+        assert_eq!(<ArchetPlugin as ClapPlugin>::CLAP_ID, "com.phonix-audio.archet");
         assert_eq!(&<ArchetPlugin as Vst3Plugin>::VST3_CLASS_ID, b"PxArchetBow00001");
     }
 

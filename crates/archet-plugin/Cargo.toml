@@ -1,6 +1,6 @@
 [package]
 name        = "archet-plugin"
-description = "Aethon Archet. VST3 / CLAP."
+description = "Archet. VST3 / CLAP."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

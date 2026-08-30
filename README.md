@@ -1,4 +1,4 @@
-# Aethon Archet
+# Archet
 
 TODO: one paragraph saying what this instrument is and how it makes its sound.
 
@@ -28,7 +28,7 @@ tree, point the host's search path at it rather than installing.
 
 ## Shared crates
 
-The six `aethon-*` crates are path dependencies on the sibling aethon
+The six `phonix-*` crates are path dependencies on the sibling phonix
 checkout, declared once in the workspace manifest under THE SDK SWITCH. When
 they get a repository and tags, that block is the only edit.
 

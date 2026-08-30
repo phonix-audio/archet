@@ -1,6 +1,6 @@
 [package]
 name        = "archet-ui"
-description = "egui editor for the Aethon Archet engine."
+description = "egui editor for the Archet engine."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

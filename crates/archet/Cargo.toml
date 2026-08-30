@@ -1,6 +1,6 @@
 [package]
 name        = "archet"
-description = "Aethon Archet — a bowed-string physical model (violin / viola / cello / double bass) with a procedural modal body, plus a plucked harpsichord voice."
+description = "Archet — a bowed-string physical model (violin / viola / cello / double bass) with a procedural modal body, plus a plucked harpsichord voice."
 readme      = "../../README.md"
 keywords    = ["audio", "dsp", "synthesis"]
 categories  = ["multimedia::audio"]

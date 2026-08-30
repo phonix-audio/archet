@@ -1,4 +1,4 @@
-//! The Aethon Archet editor, in egui.
+//! The Archet editor, in egui.
 //!
 //! A separate crate from the engine, and not a feature of it. Cargo unifies
 //! features across a resolved dependency graph, so an optional `egui` inside

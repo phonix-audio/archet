@@ -6,8 +6,8 @@
 #   scripts/build_plugins.sh --windows    # cross-compile to Windows (MSVC)
 #
 # Layout, per the VST3 spec:
-#   Aethon Archet.vst3/Contents/x86_64-linux/Aethon Archet.so    (Linux)
-#   Aethon Archet.vst3/Contents/x86_64-win/Aethon Archet.vst3    (Windows)
+#   Archet.vst3/Contents/x86_64-linux/Archet.so    (Linux)
+#   Archet.vst3/Contents/x86_64-win/Archet.vst3    (Windows)
 #
 # A CLAP is the same shared object under a `.clap` name.
 set -euo pipefail
