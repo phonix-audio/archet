@@ -1,5 +1,9 @@
 # Archet
 
+**EXPERIMENTAL.** Under development and not yet judged in use: the sound, the factory
+bank and the editor can change from one version to the next. What cannot change is
+listed in `COMPAT.md`.
+
 TODO: one paragraph saying what this instrument is and how it makes its sound.
 
 ## Layout
