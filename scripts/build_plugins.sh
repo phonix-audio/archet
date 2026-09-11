@@ -3,6 +3,7 @@
 # Build the VST3/CLAP bundle.
 #
 #   scripts/build_plugins.sh              # this platform
+#   scripts/build_plugins.sh --install    # and copy it where a host scans
 #   scripts/build_plugins.sh --windows    # cross-compile to Windows (MSVC)
 #
 # Layout, per the VST3 spec:
@@ -19,7 +20,14 @@ TD="$(cargo metadata --no-deps --format-version 1 |
       python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')"
 
 WINDOWS=0
-[[ "${1:-}" == "--windows" ]] && WINDOWS=1
+INSTALL=0
+for arg in "$@"; do
+    case "$arg" in
+        --windows) WINDOWS=1 ;;
+        --install) INSTALL=1 ;;
+        *) echo "unknown option: $arg" >&2; exit 1 ;;
+    esac
+done
 
 if [[ $WINDOWS -eq 1 ]]; then
     TARGET="x86_64-pc-windows-msvc"
@@ -63,3 +71,30 @@ cp "$SRC" "$OUT/${NAME}.clap"
 echo "bundled:"
 echo "  $DEST/${NAME}.${VST3_EXT}"
 echo "  $OUT/${NAME}.clap"
+
+# A host finds a plugin by scanning; installing is putting the bundle where it
+# already looks. The VST3 spec names ~/.vst3 on Linux and
+# ~/Library/Audio/Plug-Ins/VST3 on macOS; CLAP names the same directories under
+# .clap and CLAP. VST3_PATH and CLAP_PATH override both.
+if [[ $INSTALL -eq 1 ]]; then
+    if [[ $WINDOWS -eq 1 ]]; then
+        echo "--install has nowhere to put a Windows bundle on this machine" >&2
+        exit 1
+    fi
+    if [[ $PLATFORM == darwin ]]; then
+        VST3_HOME="${VST3_PATH:-$HOME/Library/Audio/Plug-Ins/VST3}"
+        CLAP_HOME="${CLAP_PATH:-$HOME/Library/Audio/Plug-Ins/CLAP}"
+    else
+        VST3_HOME="${VST3_PATH:-$HOME/.vst3}"
+        CLAP_HOME="${CLAP_PATH:-$HOME/.clap}"
+    fi
+    mkdir -p "$VST3_HOME" "$CLAP_HOME"
+    # Replaced whole: a bundle left over from an older build can carry an
+    # architecture directory this one no longer writes.
+    rm -rf "${VST3_HOME:?}/${NAME}.vst3"
+    cp -r "$OUT/${NAME}.vst3" "$VST3_HOME/"
+    cp "$OUT/${NAME}.clap" "$CLAP_HOME/${NAME}.clap"
+    echo "installed:"
+    echo "  $VST3_HOME/${NAME}.vst3"
+    echo "  $CLAP_HOME/${NAME}.clap"
+fi
