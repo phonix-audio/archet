@@ -9,6 +9,7 @@ pub use egui;
 pub mod chrome;
 pub mod colors;
 pub mod icons;
+pub mod mark;
 pub mod keyboard;
 pub mod preset_io;
 pub mod preset_picker;
@@ -20,3 +21,4 @@ pub mod ui_spec;
 pub mod widgets;
 
 pub use theme::Palette;
+pub use mark::mark;

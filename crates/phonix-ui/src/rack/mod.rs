@@ -90,7 +90,7 @@ pub fn draw_rack(
         let strip = Rect::from_min_size(Pos2::new(x, head.top() + 2.0), Vec2::new(200.0, HEADER_H - 4.0));
         let mut cui = ui.new_child(egui::UiBuilder::new().max_rect(strip));
         let salt = format!("{}_kind_{i}", style.salt);
-        if let Some(idx) = picker_ui(&mut cui, &PresetPickerStyle { salt: &salt, accent: style.accent, dim: style.dim }, kind_picker, &names) {
+        if let Some(idx) = picker_ui(&mut cui, &PresetPickerStyle { salt: &salt, accent: style.accent, dim: style.dim, name_in_combo: true }, kind_picker, &names) {
             if idx == 0 {
                 if i < spec.slots.len() {
                     spec.slots.remove(i);

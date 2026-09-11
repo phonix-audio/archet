@@ -8,6 +8,11 @@ pub mod chain;
 pub mod chain_spec;
 pub mod effect;
 pub mod effects;
+// Convolution reverb and its impulse responses: a reverb an instrument runs
+// inside itself, chosen against the algorithmic one by `ReverbKind`. Behind a
+// feature because it is the only thing here that wants an FFT.
+#[cfg(feature = "convolution")]
+pub mod fx;
 pub mod preset;
 pub mod registry;
 pub mod report;
