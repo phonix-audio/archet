@@ -176,6 +176,7 @@ impl ArchetApp {
             // The chrome reads a fraction; the engine publishes a percent.
             cpu: Some(self.cached_meter.cpu_percent / 100.0),
             preset_salt: "archet",
+            subtitle: None, patch_name: None, buttons: &[],
             mode_pills: &[],
             status_right: Some(&status),
         };
