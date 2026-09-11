@@ -4,7 +4,15 @@
 bank and the editor can change from one version to the next. What cannot change is
 listed in `COMPAT.md`.
 
-TODO: one paragraph saying what this instrument is and how it makes its sound.
+A bowed string, built from the acoustics literature rather than from
+samples. A digital waveguide carries the transverse and torsional waves; a
+friction junction at the bow contact solves the stick-slip that starts
+Helmholtz motion; the bridge force runs into a procedural modal body whose
+signature modes and statistical bank are the violin family's, scaled to the
+instrument chosen. Four bodies -- violin, viola, cello, double bass -- with
+sympathetic open strings behind them, a pizzicato that plucks the same
+string and lets it ring, and a section mode that renders a decorrelated desk
+of players rather than phase-locked clones.
 
 ## Layout
 

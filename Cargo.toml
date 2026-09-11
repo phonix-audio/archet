@@ -1,5 +1,6 @@
 [workspace]
 resolver = "2"
+exclude = ["vendor/phonix-sdk"]
 members = [
     "crates/archet",
     "crates/archet-ui",
@@ -20,28 +21,17 @@ repository = "https://github.com/cbonte/archet"
 archet    = { path = "crates/archet",    version = "0.1.0" }
 archet-ui = { path = "crates/archet-ui", version = "0.1.0" }
 
-# ── THE SDK SWITCH ────────────────────────────────────────────────────────
-# The seven shared crates are NOT published and there is no SDK repository yet,
-# so today they are path dependencies on the sibling phonix checkout. This
-# block is the ONLY place they are named: no member crate carries a path.
-#
-# The day the shared crates get a repository and tags, replace the seven lines
-# below with the git form and nothing else in this repository changes:
-#
-#   phonix-rt     = { git = "https://github.com/phonix-audio/phonix-sdk.git", tag = "v0.1.0" }
-#   phonix-dsp    = { git = "https://github.com/phonix-audio/phonix-sdk.git", tag = "v0.1.0" }
-#   ...
-#
-# Members opt in with `phonix-dsp = { workspace = true }`; the ones this
-# plugin does not use simply stay unreferenced here.
-phonix-rt     = { path = "../phonix/crates/phonix-rt" }
-phonix-dsp    = { path = "../phonix/crates/phonix-dsp" }
-phonix-data   = { path = "../phonix/crates/phonix-data" }
-phonix-ui     = { path = "../phonix/crates/phonix-ui" }
-phonix-fx     = { path = "../phonix/crates/phonix-fx" }
-phonix-fx-ui  = { path = "../phonix/crates/phonix-fx-ui" }
-phonix-preset = { path = "../phonix/crates/phonix-preset" }
-# ──────────────────────────────────────────────────────────────────────────
+# phonix-sdk, mirrored under vendor/ as a squashed subtree so a clone of this
+# repository alone builds. `git subtree pull --prefix vendor/phonix-sdk <sdk>
+# <tag> --squash` moves it; nothing under vendor/ is edited here. Members opt
+# in with `phonix-dsp = { workspace = true }`; the ones this plugin does not
+# use simply stay unreferenced.
+phonix-dsp    = { path = "vendor/phonix-sdk/crates/phonix-dsp" }
+phonix-fx     = { path = "vendor/phonix-sdk/crates/phonix-fx" }
+phonix-music  = { path = "vendor/phonix-sdk/crates/phonix-music" }
+phonix-plugin = { path = "vendor/phonix-sdk/crates/phonix-plugin" }
+phonix-rt     = { path = "vendor/phonix-sdk/crates/phonix-rt" }
+phonix-ui     = { path = "vendor/phonix-sdk/crates/phonix-ui" }
 
 serde      = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

@@ -24,16 +24,20 @@ Test: `archet-plugin`, `frozen_identifiers`.
 
 ## Parameter ids and persistence keys
 
-TODO: list every `#[id = "..."]` and `#[persist = "..."]`. A host stores
+`preset` is the one automatable parameter; `patch` and `editor-state` are
+the two persisted keys. A host stores
 automation against the id string.
 
 ## Patch serde field names and defaults
 
-TODO: the patch is persisted as a blob inside the host project. Field names are
+The patch is persisted as a blob inside the host project. Every field is
+`#[serde(default)]`, so a patch written by an older build still loads and a
+new field must default to today's behaviour. Field names are
 the wire format; `#[serde(default)]` plus a Default impl is what lets an old
 project open in a new build.
 
 ## Factory bank names and order
 
-TODO: a host stores a preset as an index into the bank. Appending is safe;
+`ArchetPatch::factory_presets()` is the bank, and its ORDER is the wire
+format: a host stores a preset as an index into it. Appending is safe;
 inserting, reordering or renaming is not.

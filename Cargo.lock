@@ -125,7 +125,8 @@ name = "archet"
 version = "0.1.0"
 dependencies = [
  "phonix-dsp",
- "phonix-preset",
+ "phonix-music",
+ "phonix-plugin",
  "phonix-rt",
  "serde",
  "serde_json",
@@ -140,7 +141,8 @@ dependencies = [
  "egui",
  "nice-plug",
  "nice-plug-egui",
- "phonix-preset",
+ "phonix-plugin",
+ "phonix-rt",
  "serde_json",
 ]
 
@@ -152,7 +154,8 @@ dependencies = [
  "egui",
  "egui_extras",
  "egui_kittest",
- "phonix-fx-ui",
+ "phonix-plugin",
+ "phonix-rt",
  "phonix-ui",
  "ron",
  "serde",
@@ -2808,68 +2811,45 @@ dependencies = [
 ]
 
 [[package]]
-name = "phonix-data"
-version = "0.1.0"
-dependencies = [
- "serde",
-]
-
-[[package]]
 name = "phonix-dsp"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "rustfft",
  "serde",
 ]
 
 [[package]]
-name = "phonix-fx"
-version = "0.1.0"
+name = "phonix-music"
+version = "0.3.0"
 dependencies = [
- "log",
- "phonix-data",
- "phonix-dsp",
- "rustfft",
  "serde",
 ]
 
 [[package]]
-name = "phonix-fx-ui"
-version = "0.1.0"
+name = "phonix-plugin"
+version = "0.3.0"
 dependencies = [
- "egui",
- "phonix-fx",
- "phonix-preset",
- "phonix-ui",
- "serde_json",
-]
-
-[[package]]
-name = "phonix-preset"
-version = "0.1.0"
-dependencies = [
- "phonix-data",
- "phonix-fx",
  "serde",
  "serde_json",
 ]
 
 [[package]]
 name = "phonix-rt"
-version = "0.1.0"
+version = "0.3.0"
 
 [[package]]
 name = "phonix-ui"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "directories",
  "egui",
  "egui_extras",
- "phonix-preset",
+ "phonix-plugin",
  "rfd",
  "ron",
  "serde",
  "serde_json",
+ "wayland-sys",
 ]
 
 [[package]]

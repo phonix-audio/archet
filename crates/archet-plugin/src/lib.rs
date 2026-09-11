@@ -1,4 +1,4 @@
-//! Archet — Bowed-String / Harpsichord Physical Model VST3/CLAP plugin
+//! Archet as a VST3 and CLAP plugin.
 //!
 //! Wraps the ArchetEngine in a nice-plug Plugin.
 //! No audio input — stereo synth output only. MIDI input for notes + pitch bend.
@@ -15,10 +15,10 @@ use std::sync::{mpsc, Arc, RwLock};
 
 use archet::engine::{ArchetCommand, ArchetEngine, ArchetMeterState};
 use archet::patch::{ArchetPatch, Instrument};
-use archet::state_buffer::{meter_channel, SharedReader, Writer};
+use phonix_rt::{meter_channel, SharedReader, Writer};
 use archet_ui::app::{self as archet_app, ArchetApp};
-use phonix_preset::preset::Preset;
-use phonix_preset::vstpreset::{self, ParamValue};
+use phonix_plugin::preset::Preset;
+use phonix_plugin::vstpreset::{self, ParamValue};
 
 // ── Plugin struct ──────────────────────────────────────────────────────────
 
@@ -366,16 +366,26 @@ impl Plugin for ArchetPlugin {
         let patch_state  = self.params.patch_state.clone();
         let tx           = self.command_tx.clone();
         let meter_reader = self.meter_reader.take()?;
-        let app = ArchetApp::new(tx, meter_reader);
+        let mut app = ArchetApp::new(tx, meter_reader);
+        // Seed the editor from the restored state before its first frame, or
+        // the closure below publishes the default patch over it.
+        if let Ok(p) = patch_state.read() { app.set_patch(p.clone()); }
+        let host_params = self.params.clone();
 
         create_egui_editor(
             self.params.editor_state.clone(),
             app,
             Default::default(),
             |_egui_ctx, _queue, _app| {},
-            move |ui, _setter, _queue, app| {
-                let ctx = ui.ctx().clone();
-                app.draw_ui(&ctx);
+            move |ui, setter, _queue, app| {
+                app.draw_ui(ui);
+                // A preset picked in the window moves the parameter, and the
+                // parameter loads the patch: one path, automation included.
+                if let Some(i) = app.take_wants_preset() {
+                    setter.begin_set_parameter(&host_params.preset);
+                    setter.set_parameter(&host_params.preset, i);
+                    setter.end_set_parameter(&host_params.preset);
+                }
                 if let Ok(mut p) = patch_state.write() {
                     *p = app.current_patch();
                 }
@@ -390,11 +400,18 @@ impl Plugin for ArchetPlugin {
         _context: &mut impl InitContext<Self>,
     ) -> bool {
         let sr = buffer_config.sample_rate;
-        let (rx, meter_writer) = match self.pending.take() {
-            Some(p) => p,
-            None => return false,
-        };
-        self.engine = Some(ArchetEngine::new(sr, rx, meter_writer));
+        // Re-entrant: nice-plug calls this again from `set_state` whenever a
+        // buffer config exists. The channel ends exist once, so the engine is
+        // built on the first call and re-rated in place afterwards.
+        match self.pending.take() {
+            Some((rx, meter_writer)) => {
+                self.engine = Some(ArchetEngine::new(sr, rx, meter_writer));
+            }
+            None => match self.engine.as_mut() {
+                Some(e) => e.set_sample_rate(sr),
+                None => return false,
+            },
+        }
         self.interleaved_buf = vec![0.0f32; buffer_config.max_buffer_size as usize * 2];
 
         let patch = self.params.patch_state.read().map(|p| p.clone()).unwrap_or_default();
@@ -553,6 +570,6 @@ mod frozen_identifiers {
     fn the_declared_window_size_is_the_editors_own() {
         let p = ArchetParams::new(0, Arc::new(vec!["Init".to_string()]));
         assert_eq!(p.editor_state.size(), (archet_app::W as u32, archet_app::H as u32));
-        assert_eq!((archet_app::W, archet_app::H), (1100.0, 720.0));
+        assert_eq!((archet_app::W, archet_app::H), (1160.0, 826.0));
     }
 }

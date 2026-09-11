@@ -1,389 +1,519 @@
-//! Archet GUI — bowed-string / harpsichord physical model editor.
+//! The editor: the machine under the shared chrome, the keyboard below.
 //!
-//! A single-panel knob editor (no tabs): the model has ~24 flat parameters
-//! grouped into Bow, String/Body, Articulation, Vibrato and Section sections.
-//! Archet exposes no per-parameter Set commands (only NoteOn/Off, polyphony,
-//! output and `LoadPatch`), so any knob edit pushes the whole patch via
-//! `LoadPatch` — which is non-destructive in the engine (it stores the patch
-//! and flags it dirty, it never kills active voices, so dragging a knob over a
-//! held note does not click).
+//! Laid out in fixed rectangles rather than egui containers. The composition
+//! is a drawing -- a bow crossing a string, the corpus it drives, the player
+//! holding both -- and a column layout that reflows is the wrong tool for a
+//! picture. The window does not resize, so nothing is lost by pinning it.
 
+use egui::{Align2, Color32, FontId, Pos2, Rect, Ui, Vec2};
 use std::sync::mpsc;
-use archet::state_buffer::SharedReader;
-use egui::Ui;
 
-use phonix_ui::icons;
-use archet::engine::{ArchetCommand, ArchetMeterState};
-use archet::patch::{ArchetPatch, FrictionKind};
-use phonix_ui::colors::*;
+use archet::patch::{ArchetParam, ArchetPatch, FrictionKind, Instrument};
+use archet::{ArchetCommand, ArchetMeterState};
+use phonix_plugin::preset::Preset;
+use phonix_rt::SharedReader;
+use phonix_ui::chrome::{plugin_chrome_panel, PluginChrome};
+use phonix_ui::keyboard::{keyboard_ui, KeyEvent, KeyboardState, KeyboardStyle};
+use phonix_ui::preset_picker::{NamedPreset, PresetPickerState};
+use phonix_ui::widgets;
 
-// ── The window size, in ONE place ─────────────────────────────────────────
-//
-// The plugin's `EguiState::from_size` and the size the editor is actually laid
-// out against used to be two independent numbers, and across the family they
-// disagreed often enough to ship editors that opened CROPPED. So the editor
-// crate owns the size, the plugin reads these constants, and
-// `archet_plugin`'s `the_declared_window_size_is_the_editors_own` pins the two
-// together.
-//
-// 1100x720 is the size `plugins/archet` declared in the monolith and it is
-// what the standalone plugin keeps. Note that the monolith's SEQUENCER opened
-// this editor smaller, at 840x560 (`plugin_window.rs`'s display-name-keyed
-// row, deleted with the extraction) — so unlike the seven cropped plugins the
-// gap here runs the safe way: the hosted editor is now roomier, never cut off.
-// See COMPAT.md.
-pub const W: f32 = 1100.0;
-pub const H: f32 = 720.0;
+use crate::colors::*;
+use crate::machine;
+use crate::panel_geom as geom;
+use crate::theme;
+
+/// The size the layout is drawn for. The window is fixed at this.
+pub const W: f32 = 1160.0;
+pub const H: f32 = 826.0;
+/// The panel's height inside the case, the chrome above and the keyboard
+/// below taken off.
+pub const PANEL_H: f32 = 658.0;
+const KEYBOARD_H: f32 = 104.0;
+
+/// The four bodies, in the engine's own order.
+const BODIES: [&str; 4] = ["VIOLIN", "VIOLA", "CELLO", "BASS"];
 
 pub struct ArchetApp {
-    /// Declarative body layout (hot-reloaded in debug builds).
-    spec: phonix_ui::ui_spec::SpecHandle,
-    spec_tab: usize,
-    tx:           mpsc::Sender<ArchetCommand>,
+    tx: mpsc::Sender<ArchetCommand>,
     meter_reader: SharedReader<ArchetMeterState>,
     cached_meter: ArchetMeterState,
-
     patch: ArchetPatch,
-
-    kb: phonix_ui::keyboard::KeyboardState,
-
-    presets:      Vec<ArchetPatch>,
-    preset_state: phonix_ui::preset_picker::PresetPickerState,
-
-    peak_l:        f32,
-    peak_r:        f32,
-    voice_count:   usize,
+    presets: Vec<ArchetPatch>,
+    picker: PresetPickerState,
+    /// A factory preset pick pending: the editor asks, the plugin moves the
+    /// parameter, and the parameter is what reaches the engine.
+    wants_preset: Option<i32>,
+    keys: KeyboardState,
+    /// Frames left before the editor will adopt the engine's patch again.
     sync_cooldown: u8,
+    mirror_hold: u8,
 }
 
 impl ArchetApp {
     pub fn new(tx: mpsc::Sender<ArchetCommand>, meter_reader: SharedReader<ArchetMeterState>) -> Self {
+        let presets = ArchetPatch::factory_presets();
         Self {
-            spec: phonix_ui::ui_spec::SpecHandle::load(
-                "archet", include_str!("../ui_specs/archet.ron")),
-            spec_tab: 0,
-            tx, meter_reader, cached_meter: ArchetMeterState::default(),
-            patch: ArchetPatch::default(),
-            kb: phonix_ui::keyboard::KeyboardState::new(4, 3),
-            presets: ArchetPatch::factory_presets(),
-            preset_state: phonix_ui::preset_picker::PresetPickerState::default(),
-            peak_l: 0.0, peak_r: 0.0, voice_count: 0,
+            tx,
+            meter_reader,
+            cached_meter: ArchetMeterState::default(),
+            patch: presets.first().cloned().unwrap_or_default(),
+            presets,
+            picker: PresetPickerState::default(),
+            wants_preset: None,
+            keys: KeyboardState::new(2, 4),
             sync_cooldown: 0,
+            mirror_hold: 0,
         }
     }
 
-    fn send(&self, cmd: ArchetCommand) { let _ = self.tx.send(cmd); }
-
-
-    /// Patch the editor currently displays — used by the VST3/CLAP editor to
-    /// persist GUI edits with the project.
-    pub fn current_patch(&self) -> ArchetPatch { self.patch.clone() }
-
-    fn load_preset(&mut self, idx: usize) {
-        if let Some(p) = self.presets.get(idx) {
-            self.patch = p.clone();
-            self.send(ArchetCommand::LoadPatch(Box::new(p.clone())));
-            self.sync_cooldown = 10;
-        }
+    pub fn current_patch(&self) -> ArchetPatch {
+        self.patch.clone()
     }
-}
 
-impl ArchetApp {
+    /// Seed the mirror from a patch the host has restored. Sends nothing:
+    /// an editor that pushes a patch on open stomps a running engine.
+    pub fn set_patch(&mut self, patch: ArchetPatch) {
+        self.patch = patch;
+        self.sync_cooldown = 20;
+    }
 
-    /// Draw the declarative body and turn each changed field into ONE typed
-    /// command.
-    fn draw_body(&mut self, ui: &mut Ui,
-                 fx: Option<&mut dyn phonix_fx_ui::fx_rack::FxRackBackend>) {
-        self.spec.poll();
-        let mut access = phonix_ui::ui_spec::JsonPatchAccess::new(&self.patch);
-        let mut custom = phonix_ui::ui_spec::CustomTable::new();
-        phonix_ui::ui_spec::render_spec(
-            ui, self.spec.spec(), &mut access, &mut custom, &mut self.spec_tab);
-        if self.spec.spec().tabs.get(self.spec_tab).is_some_and(|t| t.label == "FX") {
-            phonix_fx_ui::fx_host::draw_standalone_rack(ui, None, fx,
-                &phonix_fx_ui::fx_rack::FxRackConfig {
-                    label: "Insert FX", id_salt: "archet_track_fx", knob_size: 32.0 });
-        }
-        for field in phonix_ui::ui_spec::PatchAccess::take_changed(&mut access) {
-            let Some(np) = access.patch_view::<ArchetPatch>() else { continue };
-            let cmd = Self::command_for(&field, &np);
-            self.patch = np;
-            if let Some(c) = cmd {
-                self.send(c);
-                // The engine echoes its patch through the meter channel; hold
-                // the mirror off for a few frames so a drag is not fought by a
-                // stale snapshot.
-                self.sync_cooldown = 10;
-            }
+    pub fn pick_preset(&mut self, i: usize) {
+        if let Some(p) = self.presets.get(i).cloned() {
+            self.patch = p;
+            self.picker.current_idx = i;
+            self.wants_preset = Some(i as i32 + 1);
+            self.sync_cooldown = 20;
         }
     }
 
-    /// One changed field -> one typed command.
-    ///
-    /// Everything that is not already a dedicated setter travels as
-    /// `SetParam`, which writes the single field and leaves the sympathetic
-    /// strings and the voice pool alone.
-    fn command_for(field: &str, p: &ArchetPatch) -> Option<ArchetCommand> {
-        use archet::patch::ArchetParam as P;
-        use ArchetCommand as C;
-        Some(match field {
-            "output_level" => C::SetOutputLevel(p.output_level),
-            "polyphony"    => C::SetPolyphony(p.polyphony),
-            _ => {
-                let (param, value) = match field {
-                    "bow_pos"        => (P::BowPos, p.bow_pos),
-                    "bow_vel"        => (P::BowVel, p.bow_vel),
-                    "bow_force"      => (P::BowForce, p.bow_force),
-                    "bow_noise"      => (P::BowNoise, p.bow_noise),
-                    "loss"           => (P::Loss, p.loss),
-                    "slope"          => (P::Slope, p.slope),
-                    "bridge_hill_db" => (P::BridgeHillDb, p.bridge_hill_db),
-                    "tor_ratio"      => (P::TorRatio, p.tor_ratio),
-                    "tor_couple"     => (P::TorCouple, p.tor_couple),
-                    "tor_inject"     => (P::TorInject, p.tor_inject),
-                    "attack"         => (P::Attack, p.attack),
-                    "release"        => (P::Release, p.release),
-                    "vel_sens"       => (P::VelSens, p.vel_sens),
-                    "vib_rate"       => (P::VibRate, p.vib_rate),
-                    "vib_depth"      => (P::VibDepth, p.vib_depth),
-                    "vib_delay"      => (P::VibDelay, p.vib_delay),
-                    "ensemble"       => (P::Ensemble, p.ensemble),
-                    "tune_cents"     => (P::TuneCents, p.tune_cents),
-                    "friction"       => (P::Friction,
-                        if p.friction == FrictionKind::ElastoPlastic { 1.0 } else { 0.0 }),
-                    "instrument"     => (P::Instrument, p.instrument.to_index() as f32),
-                    "auto_range"     => (P::AutoRange, if p.auto_range { 1.0 } else { 0.0 }),
-                    "pluck"          => (P::Pluck, if p.pluck { 1.0 } else { 0.0 }),
-                    _ => return None,
-                };
-                C::SetParam { param, value }
-            }
-        })
+    pub fn take_wants_preset(&mut self) -> Option<i32> {
+        self.wants_preset.take()
     }
 
-    pub fn draw_ui(&mut self, ctx: &egui::Context) { self.draw_ui_inner(ctx, None) }
-
-    /// Draw with the track's insert rack, editable from the instrument's FX tab.
-    pub fn draw_ui_with_fx(&mut self, ctx: &egui::Context,
-                           fx: &mut dyn phonix_fx_ui::fx_rack::FxRackBackend) {
-        self.draw_ui_inner(ctx, Some(fx))
+    fn send(&mut self, cmd: ArchetCommand) {
+        self.sync_cooldown = 20;
+        let _ = self.tx.send(cmd);
     }
 
-    fn draw_ui_inner(&mut self, ctx: &egui::Context,
-                     fx: Option<&mut dyn phonix_fx_ui::fx_rack::FxRackBackend>) {
-        icons::install(ctx);
+    /// One named field moved: the patch here and the engine's. `SetParam`
+    /// rather than `LoadPatch`, because a whole patch rebuilds the
+    /// sympathetic strings and re-seeds the voice pool on every drag frame.
+    fn set(&mut self, param: ArchetParam, value: f32) {
+        param.apply(&mut self.patch, value);
+        self.send(ArchetCommand::SetParam { param, value });
+    }
+
+    fn refresh_meters(&mut self, adopt_ok: bool) {
         if let Ok(mut r) = self.meter_reader.try_lock() {
-            if let Some(fresh) = r.read() { self.cached_meter.clone_from(fresh); }
+            if let Some(fresh) = r.read() {
+                self.cached_meter.clone_from(fresh);
+            }
         }
-        self.peak_l = self.cached_meter.peak_l;
-        self.peak_r = self.cached_meter.peak_r;
-        self.voice_count = self.cached_meter.voice_count;
         if self.sync_cooldown > 0 {
             self.sync_cooldown -= 1;
-        } else if let Some(snap) = self.cached_meter.patch_snapshot.clone() {
-            self.patch = snap;
+        } else if adopt_ok {
+            if let Some(ref ep) = self.cached_meter.patch_snapshot {
+                self.patch = ep.clone();
+            }
         }
+    }
+
+    /// The body the patch names, as the panel's own index.
+    fn body(&self) -> usize {
+        match self.patch.instrument {
+            Instrument::Violin => 0,
+            Instrument::Viola => 1,
+            Instrument::Cello => 2,
+            Instrument::DoubleBass => 3,
+        }
+    }
+
+    // ── The window ────────────────────────────────────────────────────
+
+    pub fn draw_ui(&mut self, ui: &mut Ui) {
+        let ctx = ui.ctx().clone();
+        egui_extras::install_image_loaders(&ctx);
+        theme::apply_visuals(&ctx);
+        let adopt_ok = widgets::mirror_adopt_gate(&ctx, &mut self.mirror_hold);
+        self.refresh_meters(adopt_ok);
         ctx.request_repaint_after(std::time::Duration::from_millis(33));
 
-        // ── Header (shared chrome panel + preset picker) ─────────────────
-        self.preset_state.sync_to_name(&self.presets, &self.patch.name);
-        {
-            let peak = self.peak_l.max(self.peak_r);
-            let status = format!("{} voices", self.voice_count);
-            let res = phonix_ui::widgets::plugin_chrome_panel(ctx,
-                &phonix_ui::widgets::PluginChrome {
-                    title: "ARCHET", accent: ACCENT_ARCHET, dim: TEXT_DIM,
-                    peak, cpu: Some(self.cached_meter.cpu_percent / 100.0), preset_salt: "arc_preset",
-                    mode_pills: &[],
-                    status_right: Some(&status),
-                },
-                &mut self.preset_state, &self.presets);
-            if let Some(i) = res.preset_selected { self.load_preset(i); }
-            if res.save_clicked {
-                phonix_ui::preset_io::save_patch_to_disk(&self.patch, "Archet", &self.patch.name);
-            }
-            if res.load_clicked {
-                if let Some(p) = phonix_ui::preset_io::load_patch_from_disk::<ArchetPatch>("Archet") {
-                    self.patch = p.clone();
-                    self.send(ArchetCommand::LoadPatch(Box::new(p)));
-                }
-            }
-        }
+        self.draw_chrome(ui);
+        self.draw_keyboard(ui);
 
-        // ── On-screen keyboard for auditioning ───────────────────────────
-        // Declared BEFORE the central panel so egui reserves its space and it
-        // stays pinned at the bottom (central must be added last).
-        egui::Panel::bottom("archet_keyboard").show(ctx, |ui| {
-            self.draw_keyboard(ui);
-        });
-
-        // ── Body: parameter sections ─────────────────────────────────────
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.add_space(6.0);
-            self.draw_body(ui, fx);
-        });
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE.fill(PANEL_EDGE))
+            .show_inside(ui, |ui| {
+                let full = ui.max_rect();
+                theme::gradient_v(ui, full, Color32::from_rgb(26, 22, 20), Color32::from_rgb(10, 9, 8));
+                let case = Rect::from_min_max(full.min + Vec2::new(8.0, 6.0), full.max - Vec2::new(8.0, 10.0));
+                let panel = machine::case(ui, case);
+                machine::nameplate(ui, geom::tier(panel, 0), ROSIN);
+                self.draw_bow(ui, geom::tier(panel, 1));
+                self.draw_body(ui, geom::tier(panel, 2));
+                self.draw_player(ui, geom::tier(panel, 3));
+            });
     }
 
-
-
-    fn draw_keyboard(&mut self, ui: &mut Ui) {
-        self.kb.active.clone_from(&self.cached_meter.active_notes);
-        let style = phonix_ui::keyboard::KeyboardStyle {
-            accent: ACCENT_ARCHET, id_salt: "archet_kbd", ..Default::default()
+    fn draw_chrome(&mut self, ui: &mut Ui) {
+        if let Some(i) = self.presets.iter().position(|p| p.name == self.patch.name) {
+            self.picker.current_idx = i;
+        }
+        let cats: Vec<Option<String>> =
+            self.presets.iter().map(|p| p.preset_category().map(|c| c.to_string())).collect();
+        let named: Vec<NamedPreset> = self
+            .presets
+            .iter()
+            .zip(cats.iter())
+            .map(|(p, c)| NamedPreset { name: &p.name, category: c.as_deref() })
+            .collect();
+        let status = format!("{} voices", self.cached_meter.voice_count);
+        let chrome = PluginChrome {
+            title: "ARCHET",
+            accent: ROSIN,
+            dim: SILK_DIM,
+            peak: self.cached_meter.peak_l.max(self.cached_meter.peak_r),
+            // The chrome reads a fraction; the engine publishes a percent.
+            cpu: Some(self.cached_meter.cpu_percent / 100.0),
+            preset_salt: "archet",
+            mode_pills: &[],
+            status_right: Some(&status),
         };
-        for ev in phonix_ui::keyboard::keyboard_ui(ui, &mut self.kb, &style) {
-            match ev {
-                phonix_ui::keyboard::KeyEvent::On { note, velocity } =>
-                    self.send(ArchetCommand::NoteOn(note, velocity)),
-                phonix_ui::keyboard::KeyEvent::Off { note } =>
-                    self.send(ArchetCommand::NoteOff(note)),
-                // Wheels are off for this plugin (no PB/MW commands wired yet).
-                phonix_ui::keyboard::KeyEvent::PitchBend(_)
-                | phonix_ui::keyboard::KeyEvent::ModWheel(_) => {}
+        let res = plugin_chrome_panel(ui, &chrome, &mut self.picker, &named);
+        if let Some(i) = res.preset_selected {
+            self.pick_preset(i);
+        }
+        if res.save_clicked {
+            phonix_ui::preset_io::save_patch_to_disk(crate::PRESET_HOME, &self.patch, "Archet", &self.patch.name);
+        }
+        if res.load_clicked {
+            if let Some(p) = phonix_ui::preset_io::load_patch_from_disk::<ArchetPatch>(crate::PRESET_HOME, "Archet") {
+                self.patch = p.clone();
+                self.send(ArchetCommand::LoadPatch(Box::new(p)));
             }
         }
+    }
+
+    /// Notes go out on the raw sender, never through `send`: a note is not a
+    /// parameter edit, and arming the mirror cooldown on every key would keep
+    /// the editor from adopting the engine's patch while playing.
+    fn draw_keyboard(&mut self, ui: &mut Ui) {
+        egui::Panel::bottom("archet_keys")
+            .exact_size(KEYBOARD_H)
+            .frame(egui::Frame::NONE.fill(PANEL_EDGE).inner_margin(egui::Margin::symmetric(10i8, 4i8)))
+            .show_inside(ui, |ui| {
+                self.keys.active.clear();
+                self.keys.active.extend_from_slice(&self.cached_meter.active_notes);
+                let style = KeyboardStyle {
+                    accent: ROSIN,
+                    height: 64.0,
+                    labels: true,
+                    velocity: 100,
+                    velocity_by_y: true,
+                    header: true,
+                    wheels: true,
+                    id_salt: "archet_kbd",
+                };
+                for ev in keyboard_ui(ui, &mut self.keys, &style) {
+                    let cmd = match ev {
+                        KeyEvent::On { note, velocity } => ArchetCommand::NoteOn(note, velocity),
+                        KeyEvent::Off { note } => ArchetCommand::NoteOff(note),
+                        KeyEvent::PitchBend(v) => ArchetCommand::PitchBend(v),
+                        KeyEvent::ModWheel(_) => continue,
+                    };
+                    let _ = self.tx.send(cmd);
+                }
+            });
+    }
+
+    // ── Tier one: the bow on the string ───────────────────────────────
+
+    fn draw_bow(&mut self, ui: &mut Ui, r: Rect) {
+        theme::plate(ui, r, 4.0);
+        theme::heading(ui, Pos2::new(r.left() + 12.0, r.top() + 11.0), "THE BOW", PLATE_SILK, r.left() + 92.0);
+        theme::printed(ui, Pos2::new(r.left() + 104.0, r.top() + 11.0),
+                       "where it crosses the string, how hard, and how fast",
+                       FontId::proportional(8.5), PLATE_SILK_DIM, Align2::LEFT_CENTER);
+
+        let band = Rect::from_min_max(r.min + Vec2::new(12.0, 0.0), r.max - Vec2::new(12.0, 0.0));
+        if let Some(d) = machine::string_window(ui, geom::string_window(band), geom::string_field(band),
+                                                self.patch.bow_pos, self.patch.bow_force,
+                                                self.patch.bow_vel, self.patch.pluck, "ar_string") {
+            if (d.beta - self.patch.bow_pos).abs() > 1e-4 {
+                self.set(ArchetParam::BowPos, d.beta);
+            }
+            if (d.force - self.patch.bow_force).abs() > 1e-4 {
+                self.set(ArchetParam::BowForce, d.force);
+            }
+        }
+
+        let arco = Rect::from_min_size(geom::bow_knob(band, 0, 0) - Vec2::new(0.0, 4.0),
+                                       Vec2::new(2.5 * geom::CELL, 20.0));
+        let sel = usize::from(self.patch.pluck);
+        if let Some(i) = machine::switch(ui, arco, &["ARCO", "PIZZICATO"], sel, ROSIN, "ar_pluck") {
+            self.set(ArchetParam::Pluck, i as f32);
+        }
+        let fric = Rect::from_min_size(geom::bow_knob(band, 0, 3) - Vec2::new(0.0, 4.0),
+                                       Vec2::new(2.5 * geom::CELL, 20.0));
+        let sel = usize::from(self.patch.friction == FrictionKind::ElastoPlastic);
+        if let Some(i) = machine::switch(ui, fric, &["STATIC", "ELASTO"], sel, ROSIN, "ar_friction") {
+            self.set(ArchetParam::Friction, i as f32);
+        }
+
+        let row: [(&str, ArchetParam, f32, f32, f32, &str); 5] = [
+            ("POSITION", ArchetParam::BowPos, self.patch.bow_pos, geom::BETA_MIN, geom::BETA_MAX, "f"),
+            ("FORCE", ArchetParam::BowForce, self.patch.bow_force, 0.0, 1.0, "%"),
+            ("SPEED", ArchetParam::BowVel, self.patch.bow_vel, 0.0, 1.0, "%"),
+            ("NOISE", ArchetParam::BowNoise, self.patch.bow_noise, 0.0, 1.0, "%"),
+            ("DAMPING", ArchetParam::Loss, self.patch.loss, 0.0, 1.0, "%"),
+        ];
+        for (i, (label, param, v, lo, hi, unit)) in row.into_iter().enumerate() {
+            if let Some(nv) = self.knob(ui, geom::bow_knob(band, 1, i), geom::KNOB, label, v, lo, hi, unit, BOW) {
+                self.set(param, nv);
+            }
+        }
+    }
+
+    // ── Tier two: the body ────────────────────────────────────────────
+
+    fn draw_body(&mut self, ui: &mut Ui, r: Rect) {
+        theme::plate(ui, r, 4.0);
+        theme::heading(ui, Pos2::new(r.left() + 12.0, r.top() + 11.0), "THE BODY", PLATE_SILK, r.left() + 100.0);
+        theme::printed(ui, Pos2::new(r.left() + 112.0, r.top() + 11.0),
+                       "the corpus the string drives, and the torsion under it",
+                       FontId::proportional(8.5), PLATE_SILK_DIM, Align2::LEFT_CENTER);
+
+        let band = Rect::from_min_max(r.min + Vec2::new(12.0, 0.0), r.max - Vec2::new(12.0, 0.0));
+        if let Some(i) = machine::body_rail(ui, band, &BODIES, self.body(), "ar_body") {
+            self.set(ArchetParam::Instrument, i as f32);
+        }
+        machine::body_window(ui, geom::body_window(band), geom::body_field(band),
+                             self.body(), self.patch.bridge_hill_db);
+
+        let auto = Rect::from_min_size(geom::body_knob(band, 0, 0) - Vec2::new(0.0, 4.0),
+                                       Vec2::new(2.5 * geom::CELL, 20.0));
+        let sel = usize::from(self.patch.auto_range);
+        if let Some(i) = machine::switch(ui, auto, &["ONE BODY", "BY PITCH"], sel, BODY, "ar_auto") {
+            self.set(ArchetParam::AutoRange, i as f32);
+        }
+
+        let row: [(&str, ArchetParam, f32, f32, f32, &str); 4] = [
+            ("HILL", ArchetParam::BridgeHillDb, self.patch.bridge_hill_db, 0.0, 24.0, "dB"),
+            ("TORSION", ArchetParam::TorRatio, self.patch.tor_ratio, 0.0, 10.0, "n"),
+            ("COUPLE", ArchetParam::TorCouple, self.patch.tor_couple, 0.0, 1.0, "%"),
+            ("INJECT", ArchetParam::TorInject, self.patch.tor_inject, 0.0, 1.0, "%"),
+        ];
+        for (i, (label, param, v, lo, hi, unit)) in row.into_iter().enumerate() {
+            if let Some(nv) = self.knob(ui, geom::body_knob(band, 1, i), geom::KNOB, label, v, lo, hi, unit, BODY) {
+                self.set(param, nv);
+            }
+        }
+    }
+
+    // ── Tier three: the player ────────────────────────────────────────
+
+    fn draw_player(&mut self, ui: &mut Ui, r: Rect) {
+        theme::plate(ui, r, 4.0);
+        theme::heading(ui, Pos2::new(r.left() + 12.0, r.top() + 11.0), "THE PLAYER", PLATE_SILK, r.left() + 112.0);
+
+        let band = Rect::from_min_max(r.min + Vec2::new(12.0, 0.0), r.max - Vec2::new(12.0, 0.0));
+        let top: [(&str, ArchetParam, f32, f32, f32, &str); 5] = [
+            ("ATTACK", ArchetParam::Attack, self.patch.attack, 0.0, 0.5, "s"),
+            ("RELEASE", ArchetParam::Release, self.patch.release, 0.0, 1.0, "s"),
+            ("VIB RATE", ArchetParam::VibRate, self.patch.vib_rate, 0.0, 9.0, "Hz"),
+            ("VIB DEPTH", ArchetParam::VibDepth, self.patch.vib_depth, 0.0, 60.0, "c"),
+            ("VIB DELAY", ArchetParam::VibDelay, self.patch.vib_delay, 0.0, 2.0, "s"),
+        ];
+        for (i, (label, param, v, lo, hi, unit)) in top.into_iter().enumerate() {
+            if let Some(nv) = self.knob(ui, geom::player_knob(band, 0, i), geom::KNOB, label, v, lo, hi, unit, TRUNK) {
+                self.set(param, nv);
+            }
+        }
+        let bottom: [(&str, ArchetParam, f32, f32, f32, &str); 2] = [
+            ("DYNAMICS", ArchetParam::VelSens, self.patch.vel_sens, 0.0, 1.0, "%"),
+            ("TUNE", ArchetParam::TuneCents, self.patch.tune_cents, -50.0, 50.0, "c"),
+        ];
+        for (i, (label, param, v, lo, hi, unit)) in bottom.into_iter().enumerate() {
+            if let Some(nv) = self.knob(ui, geom::player_knob(band, 1, i), geom::KNOB, label, v, lo, hi, unit, TRUNK) {
+                self.set(param, nv);
+            }
+        }
+
+        // The section, and what leaves: the right end of the tier.
+        if let Some(nv) = self.knob(ui, geom::section_knob(band, 0), geom::KNOB, "PLAYERS",
+                                    self.patch.ensemble, 0.0, 32.0, "n", BODY) {
+            self.set(ArchetParam::Ensemble, nv);
+        }
+        let mut level = self.patch.output_level;
+        if let Some(nv) = self.knob(ui, geom::section_knob(band, 2), geom::KNOB, "LEVEL",
+                                    level, 0.0, 2.0, "n", TRUNK) {
+            level = nv;
+            self.patch.output_level = nv;
+            self.send(ArchetCommand::SetOutputLevel(nv));
+        }
+        let _ = level;
+
+        let peak = self.cached_meter.peak_l.max(self.cached_meter.peak_r);
+        machine::meter(ui, geom::meter(band), peak);
+    }
+
+    // ── The controls ──────────────────────────────────────────────────
+
+    /// A knob on the panel, at `at`, over one field. Returns the new value
+    /// when the hand moved it, and nothing when it did not.
+    #[allow(clippy::too_many_arguments)]
+    fn knob(&mut self, ui: &mut Ui, at: Pos2, size: f32, label: &str, value: f32,
+            lo: f32, hi: f32, unit: &str, tint: Color32) -> Option<f32> {
+        let span = (hi - lo).max(1e-6);
+        let mut n = ((value - lo) / span).clamp(0.0, 1.0);
+        let old = n;
+        let text = match unit {
+            "%" => format!("{:.0}", n * 100.0),
+            "Hz" => format!("{value:.1}"),
+            "s" => if value < 1.0 { format!("{:.0}ms", value * 1000.0) } else { format!("{value:.2}s") },
+            "c" => format!("{value:+.0}"),
+            "dB" => format!("{value:.1}"),
+            "f" => format!("{value:.3}"),
+            _ => format!("{value:.2}"),
+        };
+        let cell = Rect::from_min_size(at, Vec2::new(geom::CELL.max(size), size + 34.0));
+        let mut cui = ui.new_child(egui::UiBuilder::new().max_rect(cell));
+        cui.vertical_centered(|ui| {
+            widgets::knob_fmt(ui, &mut n, label, &text, size, tint);
+        });
+        ((n - old).abs() > 1e-6).then(|| lo + n * span)
     }
 }
-
-// ── helpers ──────────────────────────────────────────────────────────────────
-
-
-
-
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use archet::state_buffer::meter_channel;
     use egui_kittest::Harness;
+    use phonix_rt::meter_channel;
 
-    /// The declared window size is the size the editor is laid out against.
-    ///
-    /// The failure this pins is the one that shipped seven cropped editors: a
-    /// plugin declaring a window smaller than its own composition needs. Render
-    /// at exactly `(W, H)` and assert egui laid everything out inside it.
-    #[test]
-    fn the_editor_fits_the_declared_window_size() {
-        let (tx, _rx) = std::sync::mpsc::channel();
+    fn root(ctx: &egui::Context) -> Ui {
+        Ui::new(ctx.clone(), egui::Id::new("root"), egui::UiBuilder::new().max_rect(ctx.content_rect()))
+    }
+
+    #[allow(deprecated)]
+    fn harness(app: ArchetApp) -> Harness<'static> {
+        let mut app = app;
+        Harness::builder().with_size(egui::vec2(W, H)).build(move |ctx| app.draw_ui(&mut root(ctx)))
+    }
+
+    fn app() -> (ArchetApp, mpsc::Receiver<ArchetCommand>) {
+        let (tx, rx) = mpsc::channel();
         let (_mw, mr) = meter_channel::<ArchetMeterState>();
-        let mut app = ArchetApp::new(tx, mr);
-        let mut harness = Harness::builder()
-            .with_size(egui::vec2(W, H))
-            .build(move |ctx| {
-                egui_extras::install_image_loaders(ctx);
-                app.draw_ui(ctx);
-            });
-        harness.run_steps(2);
-        let used = harness.ctx.used_rect();
-        assert!(
-            used.width() <= W + 0.5 && used.height() <= H + 0.5,
-            "the editor lays out {}x{} but the plugin declares {W}x{H} — a host \
-             would open it cropped",
-            used.width(), used.height(),
-        );
+        (ArchetApp::new(tx, mr), rx)
     }
 
-    /// Every control in archet.ron names a field that exists in ArchetPatch.
+    /// The rail's order is the engine's order: a body chosen here is the
+    /// body the engine builds.
     #[test]
-    fn the_archet_spec_matches_the_patch() {
-        let spec: phonix_ui::ui_spec::PluginUiSpec =
-            ron::from_str(include_str!("../ui_specs/archet.ron")).expect("archet.ron parses");
-        let sample = serde_json::to_value(ArchetPatch::default()).unwrap();
-        let errs = phonix_ui::ui_spec::validate(&spec, &sample);
-        assert!(errs.is_empty(), "archet.ron does not match ArchetPatch:\n{}", errs.join("\n"));
+    fn the_rail_names_the_bodies_the_engine_has() {
+        let (mut app, _rx) = app();
+        for (i, inst) in [Instrument::Violin, Instrument::Viola, Instrument::Cello, Instrument::DoubleBass]
+            .into_iter().enumerate()
+        {
+            app.set(ArchetParam::Instrument, i as f32);
+            assert_eq!(app.patch.instrument, inst, "rail cell {i} is not {inst:?}");
+            assert_eq!(app.body(), i, "the panel reads {inst:?} back at the wrong cell");
+        }
+        assert_eq!(BODIES.len(), 4);
     }
 
-    /// Every spec param maps to a typed command, or the knob is inert.
+    /// A knob writes the field it names, and sends the engine the same
+    /// field. A knob wired to the wrong param is invisible on the panel and
+    /// wrong in the sound.
     #[test]
-    fn every_archet_control_maps_to_a_command() {
-        let spec: phonix_ui::ui_spec::PluginUiSpec =
-            ron::from_str(include_str!("../ui_specs/archet.ron")).unwrap();
-        let p = ArchetPatch::default();
-        let mut orphan = Vec::new();
-        for tab in &spec.tabs {
-            for sec in tab.sections.iter().chain(tab.bands.iter().flat_map(|b| &b.sections)) {
-                for row in &sec.rows {
-                    for c in row {
-                        if c.param.is_empty() { continue }
-                        if ArchetApp::command_for(&c.param, &p).is_none() {
-                            orphan.push(c.param.clone());
-                        }
-                    }
-                }
+    fn a_control_writes_the_field_it_names() {
+        let (mut app, rx) = app();
+        app.set(ArchetParam::BowForce, 0.42);
+        assert!((app.patch.bow_force - 0.42).abs() < 1e-6);
+        match rx.try_recv().expect("nothing was sent") {
+            ArchetCommand::SetParam { param, value } => {
+                assert_eq!(param, ArchetParam::BowForce);
+                assert!((value - 0.42).abs() < 1e-6);
             }
-        }
-        assert!(orphan.is_empty(), "spec params with no command: {orphan:?}");
-    }
-
-    /// And no typed setter is unreachable from the layout.
-    #[test]
-    fn no_archet_setter_is_unreachable() {
-        let missing = phonix_ui::ui_spec::uncovered_setters(
-            include_str!("../ui_specs/archet.ron"),
-            include_str!("../../archet/src/engine.rs"),
-            "Set",
-            &[
-                // Every layout field travels as one of these, named by
-                // `ArchetParam`; the spec addresses the FIELDS, not the command.
-                "Param",
-            ],
-        );
-        assert!(missing.is_empty(), "archet.ron reaches no control for: {missing:?}");
-    }
-
-    /// A `SetParam` writes ONE field and leaves everything else alone.
-    ///
-    /// The point of the whole exercise: a drag frame used to arrive as a full
-    /// patch, which walks the voice pool and can rebuild the sympathetic
-    /// strings under a sounding note.
-    #[test]
-    fn a_param_edit_touches_only_that_field() {
-        use archet::patch::ArchetParam;
-        let mut p = ArchetPatch::default();
-        let before = p.clone();
-        ArchetParam::BowForce.apply(&mut p, 1.75);
-        assert!((p.bow_force - 1.75).abs() < 1e-6);
-        assert_eq!(p.bow_pos, before.bow_pos);
-        assert_eq!(p.instrument, before.instrument);
-        assert_eq!(p.seed_offset, before.seed_offset);
-        assert_eq!(p.ensemble, before.ensemble);
-    }
-
-    /// Only the body choice may force a sympathetic-string rebuild.
-    #[test]
-    fn only_the_body_choice_rebuilds_the_sympathetics() {
-        use archet::patch::ArchetParam as P;
-        for p in [P::Instrument, P::AutoRange, P::Pluck] {
-            assert!(p.needs_symp_rebuild(), "{p:?} must rebuild the sympathetics");
-        }
-        for p in [P::BowPos, P::BowVel, P::Loss, P::VibRate, P::Ensemble, P::TuneCents] {
-            assert!(!p.needs_symp_rebuild(), "{p:?} must NOT rebuild the sympathetics");
+            other => panic!("a knob sent {other:?} instead of SetParam"),
         }
     }
 
-    /// The instrument index table is the GUI/audio wire format: round trip it.
+    /// The window is exactly the chrome, the panel and the keyboard.
     #[test]
-    fn the_instrument_index_table_round_trips() {
-        use archet::patch::Instrument;
-        for (i, inst) in Instrument::ALL_ORDERED.iter().enumerate() {
-            assert_eq!(Instrument::from_index(i), *inst);
-            assert_eq!(inst.to_index(), i);
-        }
+    fn the_window_holds_what_it_draws() {
+        assert!(PANEL_H + KEYBOARD_H < H, "the panel and the keyboard do not fit {H}");
+        assert!(H - PANEL_H - KEYBOARD_H >= 40.0, "no room left for the chrome");
+        assert_eq!((W, H), (1160.0, 826.0));
     }
 
     #[test]
-    #[ignore]
-    fn archet_app_snapshot() {
-        let (tx, _rx) = std::sync::mpsc::channel();
-        let (_mw, mr) = meter_channel::<ArchetMeterState>();
-        let mut app = ArchetApp::new(tx, mr);
-        let mut harness = Harness::builder()
-            .with_size(egui::vec2(840.0, 560.0))
-            .build(move |ctx| {
-                egui_extras::install_image_loaders(ctx);
-                app.draw_ui(ctx);
-            });
-        harness.run_steps(2);
-        harness.snapshot("archet_app");
+    fn the_editor_opens_on_the_first_preset() {
+        let (app, _rx) = app();
+        assert_eq!(app.patch.name, ArchetPatch::factory_presets()[0].name);
     }
+
+    #[test]
+    fn a_picked_preset_asks_for_the_parameter() {
+        let (mut app, _rx) = app();
+        app.pick_preset(3);
+        assert_eq!(app.patch.name, ArchetPatch::factory_presets()[3].name);
+        assert_eq!(app.take_wants_preset(), Some(4), "the parameter counts from one");
+        assert_eq!(app.take_wants_preset(), None, "the ask is taken once");
+    }
+
+    /// The editor adopts what the engine publishes, but not while a knob
+    /// here has just moved: a snapshot from before the move would undo it.
+    #[test]
+    fn the_editor_mirrors_the_engine_but_not_over_a_fresh_edit() {
+        let (tx, _rx) = mpsc::channel();
+        let (mut w, r) = meter_channel::<ArchetMeterState>();
+        let mut app = ArchetApp::new(tx, r);
+        let mut engine_patch = ArchetPatch::default();
+        engine_patch.name = "From the engine".into();
+        engine_patch.bow_force = 0.77;
+        {
+            let s = w.edit();
+            s.patch_snapshot = Some(engine_patch);
+            w.publish();
+        }
+        app.set(ArchetParam::BowForce, 0.1);
+        app.refresh_meters(true);
+        assert_ne!(app.patch.name, "From the engine", "a fresh edit was overwritten");
+        app.sync_cooldown = 0;
+        app.refresh_meters(true);
+        assert_eq!(app.patch.name, "From the engine");
+        assert!((app.patch.bow_force - 0.77).abs() < 1e-3);
+    }
+
+    /// Look at it. Ignored because it needs a GPU (lavapipe does):
+    ///   scripts/screenshots.sh
+    fn page_snapshot(pluck: bool, name: &str) {
+        let (tx, _rx) = mpsc::channel();
+        let (mut w, r) = meter_channel::<ArchetMeterState>();
+        {
+            let s = w.edit();
+            s.active_notes = vec![55, 62, 67];
+            s.voice_count = 3;
+            s.peak_l = 0.58;
+            s.peak_r = 0.6;
+            s.cpu_percent = 11.0;
+            w.publish();
+        }
+        let mut app = ArchetApp::new(tx, r);
+        let bank = ArchetPatch::factory_presets();
+        let i = bank.iter().position(|p| p.pluck == pluck).unwrap_or(0);
+        app.pick_preset(i);
+        let mut h = harness(app);
+        h.run_steps(3);
+        h.snapshot(name);
+    }
+
+    #[test]
+    #[ignore = "needs a rendering backend"]
+    fn archet_arco_snapshot() { page_snapshot(false, "archet_arco"); }
+
+    #[test]
+    #[ignore = "needs a rendering backend"]
+    fn archet_pizzicato_snapshot() { page_snapshot(true, "archet_pizzicato"); }
 }

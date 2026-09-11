@@ -1,0 +1,7 @@
+# The screenshots the documentation shows, one snapshot name per line.
+#
+# A name here must match a `snapshot("<name>")` call, or scripts/screenshots.sh
+# says so rather than copying nothing quietly.
+
+archet_arco
+archet_pizzicato

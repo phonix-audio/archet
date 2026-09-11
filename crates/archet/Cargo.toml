@@ -1,6 +1,6 @@
 [package]
 name        = "archet"
-description = "Archet — a bowed-string physical model (violin / viola / cello / double bass) with a procedural modal body, plus a plucked harpsichord voice."
+description = "A bowed string: violin, viola, cello and double bass, as a digital waveguide through a procedural modal body, arco or pizzicato."
 readme      = "../../README.md"
 keywords    = ["audio", "dsp", "synthesis"]
 categories  = ["multimedia::audio"]
@@ -16,11 +16,12 @@ crate-type = ["rlib"]
 
 [dependencies]
 serde = { workspace = true }
-# Opt into the shared crates this engine actually needs; the paths live in the
-# workspace manifest so the SDK switch is one edit there, never here.
-phonix-dsp    = { workspace = true }   # filters::BiquadT — the modal body's biquad
+# The shared crates this engine names, and no more. The paths live in the
+# workspace manifest so the SDK moves in one edit, never here.
+phonix-dsp    = { workspace = true }   # filters::BiquadT -- the modal body's biquad
+phonix-music  = { workspace = true }   # midi::hz_of, the tuning table
+phonix-plugin = { workspace = true }   # the `Preset` trait ArchetPatch implements
 phonix-rt     = { workspace = true }   # the lock-free meter channel
-phonix-preset = { workspace = true }   # the `Preset` trait ArchetPatch implements
 
 # There is no [features] table, and the absence is the contract. Cargo unifies
 # features across a resolved graph, so an optional `egui` here would be switched
