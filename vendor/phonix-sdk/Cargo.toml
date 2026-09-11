@@ -9,6 +9,7 @@ members = [
     "crates/phonix-fx",
     "crates/phonix-plugin",
     "crates/phonix-legacy",
+    "crates/phonix-host",
 ]
 
 [profile.release]

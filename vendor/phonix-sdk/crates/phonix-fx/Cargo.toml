@@ -17,16 +17,22 @@ reverb = []
 brickwall-limiter = []
 delay = []
 stereo-imager = []
+# Partitioned-block FFT convolution, and the impulse responses it runs. Its
+# own feature because it is the only thing here that wants an FFT.
+convolution = ["dep:rustfft"]
+# A bucket-brigade chorus, wrapping the shared delay-line primitive.
+chorus = ["dep:phonix-dsp"]
 # Families.
 eq = ["parametric-eq"]
 dynamics = ["compressor", "brickwall-limiter"]
-reverbs = ["reverb"]
+reverbs = ["reverb", "convolution"]
 delays = ["delay"]
-spatial = ["stereo-imager"]
+spatial = ["stereo-imager", "chorus"]
 full = ["eq", "dynamics", "reverbs", "delays", "spatial"]
 
 [dependencies]
 phonix-dsp = { path = "../phonix-dsp", optional = true }
+rustfft = { version = "6.2", optional = true }
 serde = { version = "1.0", features = ["derive"] }
 
 [dev-dependencies]

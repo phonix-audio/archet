@@ -1,0 +1,61 @@
+[package]
+name = "phonix-host"
+version = "0.3.0"
+edition = "2021"
+license = "MIT"
+description = "Hosting a plugin: loading a VST3 or CLAP bundle, opening an audio device, and running one against the other"
+keywords = ["audio", "vst3", "clap", "host"]
+categories = ["multimedia::audio"]
+repository = "https://github.com/phonix-audio/phonix"
+
+[dependencies]
+# The preset container a VST3 bundle ships its factory bank in. Shared with
+# the plugin side, which writes the files this reads.
+phonix-plugin = { path = "../phonix-plugin", version = "0.3.0" }
+# `AudioRequest` / `HostStatus`: the request-and-report pair a GUI drives the
+# device with. They live beside the chrome that draws them, which is the only
+# reader; pure data, no widget is pulled in by naming them here.
+phonix-ui = { path = "../phonix-ui", version = "0.3.0" }
+
+# Flush-to-zero on the audio thread. A decaying filter tail that falls into
+# the denormal range costs 20-100x on x86, which a host hears as crackle.
+phonix-rt = { path = "../phonix-rt", version = "0.3.0" }
+
+# VST3
+vst3-sys = { git = "https://github.com/robbert-vdh/vst3-sys.git", branch = "fix/drop-box-from-raw" }
+vst3-com = { git = "https://github.com/robbert-vdh/vst3-sys.git", branch = "fix/drop-box-from-raw" }
+libloading = "0.8"
+
+# CLAP
+clap-sys = "0.5"
+
+# Audio devices
+cpal = "0.15"
+# Promote the callback thread to RT scheduling. Default features pull dbus and
+# RTKit on Linux, which would make this crate need libdbus-1-dev to compile for
+# a fallback it can live without: sched_setscheduler works wherever the user
+# has rtprio, which is standard on a PipeWire or JACK system.
+audio_thread_priority = { version = "0.34", default-features = false }
+
+serde = { version = "1.0", features = ["derive"] }
+# The state a plugin persists is JSON; the tests read it back.
+serde_json = "1.0"
+log = "0.4"
+anyhow = "1.0"
+# MIDI input, for the host that wires one to the plugin.
+midir = "0.10"
+
+[dev-dependencies]
+# A nice-plug wrapper compresses the state it persists; a test that reads one
+# back has to undo that.
+zstd = "0.13"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# dlopen'd at run time, so building this crate needs no libjack-dev and a
+# machine without a JACK server falls back to cpal.
+jack = "0.13"
+# mlockall, for pinning the pages the audio thread touches.
+libc = "0.2"
+# The window a plugin's own editor is embedded in. X11 only: VST3 defines no
+# platform type for Wayland, so `editor` has nothing to attach to there.
+x11rb = "0.13"

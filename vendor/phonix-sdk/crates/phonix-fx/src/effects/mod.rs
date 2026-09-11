@@ -19,6 +19,8 @@ pub mod parametric_eq;
 pub mod reverb;
 #[cfg(feature = "stereo-imager")]
 pub mod stereo_imager;
+#[cfg(feature = "chorus")]
+pub mod chorus;
 
 use crate::registry::Entry;
 
@@ -38,6 +40,8 @@ pub fn builtin() -> Vec<Entry> {
     entries.push(Entry { spec: &delay::SPEC, build: delay::build });
     #[cfg(feature = "stereo-imager")]
     entries.push(Entry { spec: &stereo_imager::SPEC, build: stereo_imager::build });
+    #[cfg(feature = "chorus")]
+    entries.push(Entry { spec: &chorus::SPEC, build: chorus::build });
     entries
 }
 

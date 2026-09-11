@@ -62,6 +62,13 @@ pub struct PresetPickerStyle<'a> {
     pub salt:   &'a str,            // unique id for ComboBox state
     pub accent: egui::Color32,      // plugin's accent colour
     pub dim:    egui::Color32,      // secondary colour
+    /// Whether the combo shows the current entry's NAME.
+    ///
+    /// The plugin header carries the patch name in a field of its own, and a
+    /// combo repeating it beside that field is the same name printed twice.
+    /// Everywhere else the picker is the only thing naming the selection, so
+    /// it stays true.
+    pub name_in_combo: bool,
 }
 
 /// Render the picker. Returns `Some(new_idx)` if the user picked a
@@ -145,8 +152,10 @@ pub fn picker_ui<P: Preset>(
                 RichText::new(cur_cat.unwrap_or("")).color(style.dim).size(10.0).strong());
         }
 
+        // Fixed width either way, so hiding the name moves nothing after it.
+        let combo_label = if style.name_in_combo { cur_label } else { "Presets" };
         egui::ComboBox::from_id_salt(style.salt)
-            .selected_text(RichText::new(cur_label).color(style.accent))
+            .selected_text(RichText::new(combo_label).color(style.accent))
             .width(COMBO_WIDTH_PX)
             .show_ui(ui, |ui| {
                 let mut last_cat: Option<&str> = None;

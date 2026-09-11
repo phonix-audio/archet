@@ -15,6 +15,9 @@ pub mod vibrato;
 pub mod oscillator;
 // A 16-bank wavetable oscillator.
 pub mod wavetable;
+// Phase warping for a wavetable oscillator: the shapes a single-cycle table
+// is read through.
+pub mod warp;
 // Distinct from `envelope`: another curve and another retrigger rule.
 pub mod adsr;
 
@@ -28,6 +31,8 @@ pub mod rms_compressor;
 // The Drum Machine's synthesized rock-kit voices (Canon909 reuses them).
 // Engine-agnostic modulation sources, and the ADSR / LFO parameter shapes.
 pub mod mod_sources;
+// An LFO that walks a drawn path rather than a fixed shape.
+pub mod path_lfo;
 pub mod synth_params;
 pub mod spectral_resynth;
 pub mod pitch;

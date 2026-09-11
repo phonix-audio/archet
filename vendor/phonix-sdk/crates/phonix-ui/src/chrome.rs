@@ -81,16 +81,34 @@ pub fn take_request(ctx: &egui::Context) -> Option<AudioRequest> {
 
 
 /// One selectable pill in the header's mode strip.
+#[derive(Default)]
 pub struct PillEntry<'a> {
     pub label:    &'a str,
     pub selected: bool,
 }
 
+/// One of the plugin's own switches, carried here rather than on a second
+/// header row of the plugin's own.
+#[derive(Default)]
+pub struct ButtonEntry<'a> {
+    pub label: &'a str,
+    /// Drawn as held down. A momentary switch passes false.
+    pub on:    bool,
+}
+
 /// Inputs to `plugin_chrome`. Builder-style — set only what the
-/// plugin actually has. Empty `mode_pills` skips the strip, `None`
-/// status_right skips the status block.
+/// plugin actually has, and take the rest from `Default`. Empty
+/// `mode_pills` skips the strip, `None` status_right skips the status block.
+///
+/// It carries the instrument's whole header: the name, what the instrument
+/// is, the patch's own name and the plugin's switches. A plugin that printed
+/// any of those on a nameplate of its own was printing a second header bar
+/// under this one, saying the same things twice.
+#[derive(Default)]
 pub struct PluginChrome<'a> {
     pub title:        &'a str,
+    /// What the instrument is, in a few words, printed beside the name.
+    pub subtitle:     Option<&'a str>,
     pub accent:       Color32,
     pub dim:          Color32,
     pub peak:         f32,
@@ -99,12 +117,19 @@ pub struct PluginChrome<'a> {
     /// header). `None` = not shown.
     pub cpu:          Option<f32>,
     pub preset_salt:  &'a str,
+    /// The patch's own name, editable here. The picker matches against it and
+    /// a disk save is offered under it, so a plugin that hides it makes a
+    /// renamed patch unreachable.
+    pub patch_name:   Option<&'a str>,
     pub mode_pills:   &'a [PillEntry<'a>],
+    /// The plugin's own switches, after the pills.
+    pub buttons:      &'a [ButtonEntry<'a>],
     pub status_right: Option<&'a str>,
 }
 
 /// What the chrome reports back to the plugin. The plugin reacts by
 /// sending an engine command + updating its mirror.
+#[derive(Default)]
 pub struct ChromeResult {
     pub pill_clicked:    Option<usize>,
     pub preset_selected: Option<usize>,
@@ -114,6 +139,10 @@ pub struct ChromeResult {
     /// The "Load" disk button was clicked — the plugin should load a patch from
     /// disk (e.g. via `crate::preset_io::load_patch_from_disk`).
     pub load_clicked:    bool,
+    /// The patch was renamed in the header's name field.
+    pub renamed:         Option<String>,
+    /// Which of `buttons` was clicked.
+    pub button_clicked:  Option<usize>,
 }
 
 /// Render the standard plugin header. Returns indices of any UI
@@ -142,6 +171,8 @@ pub fn plugin_chrome<P: preset_picker::Preset>(
     let mut preset_selected = None;
     let mut save_clicked = false;
     let mut load_clicked = false;
+    let mut renamed = None;
+    let mut button_clicked = None;
 
     ui.horizontal(|ui| {
         ui.set_min_height(CHROME_ROW_H);
@@ -149,22 +180,33 @@ pub fn plugin_chrome<P: preset_picker::Preset>(
         // the row keeps a predictable baseline / height.
         ui.label(RichText::new(chrome.title)
             .color(chrome.accent).strong().size(CHROME_TITLE_PT));
+        if let Some(s) = chrome.subtitle {
+            ui.add_space(CHROME_GAP / 2.0);
+            ui.label(RichText::new(s).color(chrome.dim).size(CHROME_PILL_PT));
+        }
         ui.add_space(CHROME_GAP);
 
-        // Optional mode pills.
-        for (i, pill) in chrome.mode_pills.iter().enumerate() {
-            let col = if pill.selected { chrome.accent } else { chrome.dim };
-            let text = RichText::new(pill.label).color(col).strong().size(CHROME_PILL_PT);
-            if ui.selectable_label(pill.selected, text).clicked() {
-                pill_clicked = Some(i);
+        // The patch's own name, where the picker that matches it is.
+        if let Some(name) = chrome.patch_name {
+            let mut edited = name.to_string();
+            if ui.add(egui::TextEdit::singleline(&mut edited)
+                .desired_width(PATCH_NAME_W)
+                .font(egui::TextStyle::Small)
+                .text_color(chrome.accent))
+                .changed()
+            {
+                renamed = Some(edited);
             }
+            ui.add_space(CHROME_GAP);
         }
-        if !chrome.mode_pills.is_empty() { ui.add_space(CHROME_GAP); }
 
         // Preset picker — fixed 200 px wide widget that handles its
         // own internal layout. Identity-only style.
         let style = preset_picker::PresetPickerStyle {
             salt: chrome.preset_salt, accent: chrome.accent, dim: chrome.dim,
+            // The name field above already carries it; a combo repeating it is
+            // the duplication this header exists to remove.
+            name_in_combo: chrome.patch_name.is_none(),
         };
         preset_selected = preset_picker::picker_ui(ui, &style, preset_state, presets);
 
@@ -175,6 +217,27 @@ pub fn plugin_chrome<P: preset_picker::Preset>(
         }
         if ui.small_button(RichText::new("Load").color(chrome.dim).size(CHROME_PILL_PT)).clicked() {
             load_clicked = true;
+        }
+
+        // The plugin's own switches, then the pages it can show. The order is
+        // the same in every plugin: what the patch is, then what to do with
+        // it, then which page of it to look at.
+        if !chrome.buttons.is_empty() { ui.add_space(CHROME_GAP); }
+        for (i, b) in chrome.buttons.iter().enumerate() {
+            let col = if b.on { chrome.accent } else { chrome.dim };
+            let text = RichText::new(b.label).color(col).strong().size(CHROME_PILL_PT);
+            if ui.selectable_label(b.on, text).clicked() {
+                button_clicked = Some(i);
+            }
+        }
+
+        if !chrome.mode_pills.is_empty() { ui.add_space(CHROME_GAP); }
+        for (i, pill) in chrome.mode_pills.iter().enumerate() {
+            let col = if pill.selected { chrome.accent } else { chrome.dim };
+            let text = RichText::new(pill.label).color(col).strong().size(CHROME_PILL_PT);
+            if ui.selectable_label(pill.selected, text).clicked() {
+                pill_clicked = Some(i);
+            }
         }
 
         // Right-aligned tail: status text (if any) then meter.
@@ -229,7 +292,7 @@ pub fn plugin_chrome<P: preset_picker::Preset>(
         });
     });
 
-    ChromeResult { pill_clicked, preset_selected, save_clicked, load_clicked }
+    ChromeResult { pill_clicked, preset_selected, save_clicked, load_clicked, renamed, button_clicked }
 }
 /// Pinned chrome row height (px). All title / pills / picker / status
 /// share this row so the chrome looks identical across plugins.
@@ -238,6 +301,9 @@ const CHROME_TITLE_PT: f32 = 14.0;
 const CHROME_PILL_PT:  f32 = 11.0;
 const CHROME_STATUS_PT:f32 = 10.0;
 const CHROME_GAP:      f32 = 12.0;
+/// The patch name field. Wide enough for the longest factory preset name in
+/// the catalogue without pushing the picker off a narrow panel.
+const PATCH_NAME_W:    f32 = 150.0;
 
 /// The chrome in a `Panel::top` with one frame, so every plugin window gets
 /// the same fill, border, margin and height whatever theme its body uses.
@@ -265,6 +331,40 @@ mod chrome_tests {
     use super::*;
     use crate::preset_picker::{NamedPreset, PresetPickerState};
 
+    /// Every plugin wears the SAME header, so the row is one height whatever
+    /// is put in it: a window whose bar is taller than its neighbour's, or
+    /// that grows one when a patch is renamed, is the defect this guards.
+    #[test]
+    fn the_header_is_one_height_whatever_it_carries() {
+        let measure = |chrome: &PluginChrome| -> f32 {
+            let ctx = egui::Context::default();
+            let mut state = PresetPickerState::default();
+            let presets = [NamedPreset { name: "A", category: None }];
+            let mut h = 0.0;
+            let _ = ctx.run(Default::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    h = ui.scope(|ui| { plugin_chrome(ui, chrome, &mut state, &presets); })
+                        .response.rect.height();
+                });
+            });
+            h
+        };
+
+        let bare = measure(&PluginChrome {
+            title: "BARE", accent: Color32::RED, dim: Color32::GRAY, preset_salt: "bare",
+            ..Default::default()
+        });
+        let pills = [PillEntry { label: "PANEL", selected: true }];
+        let buttons = [ButtonEntry { label: "INIT", on: false }];
+        let full = measure(&PluginChrome {
+            title: "FULL", subtitle: Some("what it is"),
+            accent: Color32::RED, dim: Color32::GRAY, peak: 0.7, cpu: Some(0.2),
+            preset_salt: "full", patch_name: Some("Shred"),
+            mode_pills: &pills, buttons: &buttons, status_right: Some("8 voices"),
+        });
+        assert_eq!(bare, full, "the header changed height with what it carries");
+    }
+
     /// Smoke test: chrome with mode pills + status renders without
     /// panicking inside a synthetic egui context.
     #[test]
@@ -279,22 +379,31 @@ mod chrome_tests {
             PillEntry { label: "M1", selected: true  },
             PillEntry { label: "M2", selected: false },
         ];
+        let buttons = [
+            ButtonEntry { label: "INIT", on: false },
+            ButtonEntry { label: "HELP", on: true  },
+        ];
         let _ = ctx.run(Default::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let res = plugin_chrome(
                     ui,
                     &PluginChrome {
-                        title: "TEST", accent: Color32::RED, dim: Color32::GRAY,
+                        title: "TEST", subtitle: Some("what it is"),
+                        accent: Color32::RED, dim: Color32::GRAY,
                         peak: 0.5, cpu: Some(0.42), preset_salt: "test",
+                        patch_name: Some("Shred"),
                         mode_pills: &pills,
+                        buttons: &buttons,
                         status_right: Some("8 voices"),
                     },
                     &mut state,
                     &presets,
                 );
-                // Defaults: nothing clicked the first frame.
+                // Defaults: nothing clicked or renamed the first frame.
                 assert!(res.pill_clicked.is_none());
                 assert!(res.preset_selected.is_none());
+                assert!(res.button_clicked.is_none());
+                assert!(res.renamed.is_none());
             });
         });
     }
