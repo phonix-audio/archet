@@ -514,21 +514,18 @@ impl ClapPlugin for ArchetPlugin {
     const CLAP_DESCRIPTION: Option<&'static str> = Some("Bowed-String / Harpsichord Physical Model");
     const CLAP_MANUAL_URL: Option<&'static str> = None;
     const CLAP_SUPPORT_URL: Option<&'static str> = None;
-    const CLAP_FEATURES: &'static [ClapFeature] = &[
-        ClapFeature::Instrument,
-        ClapFeature::Synthesizer,
-        ClapFeature::Stereo,
-    ];
+    // What this plugin IS, in the vocabulary each format publishes. A host
+    // groups its plugin list by these, so they are the plugin's answer to
+    // "where do I belong" -- not something a browser should be keeping a
+    // table of.
+    const CLAP_FEATURES: &'static [ClapFeature] = &[ClapFeature::Instrument, ClapFeature::Custom("physical-modeling"), ClapFeature::Custom("strings"), ClapFeature::Stereo];
 }
 
 // ── VST3 ──────────────────────────────────────────────────────────────────
 
 impl Vst3Plugin for ArchetPlugin {
     const VST3_CLASS_ID: [u8; 16] = *b"PxArchetBow00001";
-    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] = &[
-        Vst3SubCategory::Instrument,
-        Vst3SubCategory::Synth,
-    ];
+    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] = &[Vst3SubCategory::Instrument, Vst3SubCategory::Synth];
 }
 
 nice_export_clap!(ArchetPlugin);
