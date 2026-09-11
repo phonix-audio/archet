@@ -1,0 +1,10 @@
+[package]
+name = "phonix-music"
+version = "0.3.0"
+edition = "2021"
+license = "MIT"
+description = "Notes, time and theory: MIDI notes and ticks, scales, the arpeggiator, groove templates. No audio, no GUI, no session."
+repository = "https://github.com/phonix-audio/phonix-sdk"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }

@@ -1,0 +1,33 @@
+[package]
+name = "phonix-fx"
+version = "0.3.0"
+edition = "2021"
+license = "MIT"
+description = "The effects contract: the Effect trait, self-describing parameter specs, chains and their serialisable description; every effect behind a feature"
+keywords = ["audio", "effects", "reverb", "delay", "vst"]
+categories = ["multimedia::audio"]
+repository = "https://github.com/phonix-audio/phonix-sdk"
+
+[features]
+default = []
+# One feature per effect kind. A consumer names what it ships.
+parametric-eq = ["dep:phonix-dsp"]
+compressor = []
+reverb = []
+brickwall-limiter = []
+delay = []
+stereo-imager = []
+# Families.
+eq = ["parametric-eq"]
+dynamics = ["compressor", "brickwall-limiter"]
+reverbs = ["reverb"]
+delays = ["delay"]
+spatial = ["stereo-imager"]
+full = ["eq", "dynamics", "reverbs", "delays", "spatial"]
+
+[dependencies]
+phonix-dsp = { path = "../phonix-dsp", optional = true }
+serde = { version = "1.0", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1.0"

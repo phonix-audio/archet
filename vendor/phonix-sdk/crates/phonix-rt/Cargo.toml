@@ -1,0 +1,11 @@
+[package]
+name = "phonix-rt"
+version = "0.3.0"
+edition = "2021"
+license = "MIT"
+description = "What the audio thread is allowed to touch: lock-free state hand-off, the denormal guard, delay compensation"
+keywords = ["audio", "realtime", "lock-free", "triple-buffer"]
+categories = ["multimedia::audio", "concurrency"]
+repository = "https://github.com/phonix-audio/phonix"
+
+[dependencies]

@@ -1,0 +1,16 @@
+[package]
+name = "phonix-dsp"
+version = "0.3.0"
+edition = "2021"
+license = "MIT"
+description = "Plugin-agnostic DSP primitives: filters, oscillators, LFOs, dynamics, granular and spectral resynthesis"
+keywords = ["audio", "dsp", "filter", "oscillator", "synthesis"]
+categories = ["multimedia::audio"]
+repository = "https://github.com/phonix-audio/phonix"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+rustfft = "6.2"
+
+[dev-dependencies]
+hound = "3.5"

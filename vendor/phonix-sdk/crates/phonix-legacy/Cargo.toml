@@ -1,0 +1,16 @@
+[package]
+name = "phonix-legacy"
+version = "0.3.0"
+edition = "2021"
+license = "MIT"
+description = "Reads the effect state written before names were the wire format and rewrites it as a ChainSpec"
+keywords = ["audio", "effects", "migration"]
+categories = ["multimedia::audio"]
+repository = "https://github.com/phonix-audio/phonix-sdk"
+
+[dependencies]
+phonix-fx = { path = "../phonix-fx" }
+serde = { version = "1.0", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1.0"
