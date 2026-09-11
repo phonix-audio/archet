@@ -1,0 +1,13 @@
+[package]
+name = "phonix-plugin"
+version = "0.3.0"
+edition = "2021"
+license = "MIT"
+description = "What a plugin binary needs that is neither audio nor a widget: the preset contract, the .vstpreset writer, its identity, and the in-process instrument contract"
+keywords = ["audio", "preset", "vst3", "vstpreset"]
+categories = ["multimedia::audio"]
+repository = "https://github.com/phonix-audio/phonix"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"

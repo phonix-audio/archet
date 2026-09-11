@@ -1,0 +1,15 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/phonix-rt",
+    "crates/phonix-dsp",
+    "crates/phonix-music",
+    "crates/phonix-session",
+    "crates/phonix-ui",
+    "crates/phonix-fx",
+    "crates/phonix-plugin",
+    "crates/phonix-legacy",
+]
+
+[profile.release]
+opt-level = 3

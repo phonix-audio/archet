@@ -1,0 +1,39 @@
+[package]
+name = "phonix-ui"
+version = "0.3.0"
+edition = "2021"
+license = "MIT"
+description = "The editor layer: the design system as a value, widgets, icons, the piano keyboard, the preset picker, the plugin chrome"
+keywords = ["egui", "gui", "widgets", "audio"]
+categories = ["gui", "multimedia::audio"]
+repository = "https://github.com/phonix-audio/phonix-sdk"
+
+[features]
+default = ["ui-spec"]
+# The declarative layout renderer over a .ron spec the editor carries itself.
+ui-spec = ["dep:ron"]
+# The effects rack: a panel drawn from any EffectSpec, and slots over a ChainSpec.
+rack = ["dep:phonix-fx"]
+
+[dependencies]
+phonix-plugin = { path = "../phonix-plugin" }
+phonix-fx = { path = "../phonix-fx", default-features = false, optional = true }
+egui = "0.34"
+egui_extras = { version = "0.34", features = ["all_loaders"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+ron = { version = "0.12", optional = true }
+# The shared patch save/load dialogs.
+directories = "5.0"
+rfd = "0.15"
+
+[dev-dependencies]
+egui_kittest = { version = "0.34", features = ["wgpu", "snapshot"] }
+phonix-fx = { path = "../phonix-fx", features = ["full"] }
+
+# rfd pulls wayland-sys in, whose build script demands libwayland-client's
+# pkg-config file at COMPILE time, for a library nothing here calls directly.
+# With `dlopen` it is looked up at run time instead, so a machine without the
+# Wayland headers still builds this crate.
+[target.'cfg(target_os = "linux")'.dependencies]
+wayland-sys = { version = "0.31", features = ["dlopen"] }

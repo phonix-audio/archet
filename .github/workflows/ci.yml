@@ -1,0 +1,52 @@
+# Builds and tests the workspace on Linux and Windows from a clone with no
+# sibling checkout: a path dependency that reaches outside this repository
+# fails here before it fails a consumer. Nothing here needs a secret.
+name: ci
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Linux build prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl-dev libx11-xcb-dev libxcb1-dev libxcb-dri2-0-dev libxcb-icccm4-dev libxcursor-dev libxkbcommon-dev libxcb-shape0-dev libxcb-xfixes0-dev libgtk-3-dev
+
+      # Reads rust-toolchain.toml.
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build alone
+        run: cargo build --workspace --locked
+
+      - name: Build every crate with no default features
+        run: cargo build --workspace --locked --no-default-features
+
+      - name: Test
+        run: cargo test --workspace --locked
+
+      # Only phonix-ui may pull egui in.
+      - name: No egui below the editor layer
+        shell: bash
+        run: |
+          for c in phonix-rt phonix-dsp phonix-music phonix-fx phonix-plugin phonix-session phonix-legacy; do
+            if cargo tree -e normal -p "$c" | grep -q ' egui '; then
+              echo "$c depends on egui"; exit 1
+            fi
+          done
