@@ -93,6 +93,9 @@ if [[ $INSTALL -eq 1 ]]; then
     # architecture directory this one no longer writes.
     rm -rf "${VST3_HOME:?}/${NAME}.vst3"
     cp -r "$OUT/${NAME}.vst3" "$VST3_HOME/"
+    # Removed first: an earlier install may have left a symlink pointing back
+    # at this very file, and cp refuses to copy a file onto itself.
+    rm -f "${CLAP_HOME:?}/${NAME}.clap"
     cp "$OUT/${NAME}.clap" "$CLAP_HOME/${NAME}.clap"
     echo "installed:"
     echo "  $VST3_HOME/${NAME}.vst3"
