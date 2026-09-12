@@ -589,6 +589,53 @@ mod profile {
         println!("wrote /tmp/archet_pizz_{{G3,D4,A4,E5}}.wav");
     }
 
+    /// Whether the pluck position really moves from one note to the next.
+    ///
+    /// One pitch plucked over and over, with a gap long enough that each note
+    /// decays on its own, so every note draws its own position and the comb it
+    /// leaves can be fitted note by note. `pizz_decay` cannot show this: one
+    /// note has one position, and four notes are four samples.
+    ///   cargo test --lib engine::profile::pizz_spread -- --ignored --nocapture
+    #[test]
+    #[ignore = "diagnostic — run with --ignored"]
+    fn pizz_spread() {
+        let sr = 48_000.0_f32;
+        let bank = crate::patch::ArchetPatch::factory_presets();
+        let preset = bank
+            .iter()
+            .find(|p| p.name == "Violin Pizzicato")
+            .expect("the bank no longer has Violin Pizzicato");
+        let (mut eng, tx, _mr) = ArchetEngine::new_for_plugin(sr);
+        let mut p = preset.clone();
+        p.polyphony = 1;
+        tx.send(ArchetCommand::LoadPatch(Box::new(p))).unwrap();
+        // D4: the open string whose fifth harmonic a fixed position buried
+        // deepest.
+        let pitch = 62u8;
+        let notes = 10usize;
+        let block = 512usize;
+        let per = (1.2 * sr) as usize / block;
+        let mut out: Vec<f32> = Vec::new();
+        let mut buf = vec![0.0f32; block * 2];
+        println!("  pluck     peak");
+        for k in 0..notes {
+            tx.send(ArchetCommand::NoteOn(pitch, 100)).unwrap();
+            let start = out.len();
+            for _ in 0..per {
+                buf.fill(0.0);
+                eng.process_audio(&mut buf, 2);
+                for i in 0..block {
+                    out.push(buf[i * 2]);
+                }
+            }
+            let peak = out[start..].iter().fold(0.0f32, |m, x| m.max(x.abs()));
+            println!("  {:>5}   {peak:7.4}", k + 1);
+            tx.send(ArchetCommand::NoteOff(pitch)).unwrap();
+        }
+        write_wav("/tmp/archet_pizz_spread.wav", &out, sr);
+        println!("wrote /tmp/archet_pizz_spread.wav, one pitch plucked {notes} times");
+    }
+
     /// Acoustic-fit harness: render the violin patch at G3/D4/A4/D5/A5 ->
     /// /tmp/archet_<pitch>.wav, so the harmonic envelope can be measured and
     /// the body/string tuning driven OBJECTIVELY (no listening).
