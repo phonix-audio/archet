@@ -554,12 +554,25 @@ impl ArchetVoice {
             let (eta_f, eta_a) = Self::string_losses(self.inst_idx);
             const ETA_B: f32 = 2.0e-2;
             let f0 = self.freq_hz;
+            // (d) and the body drains the string, which is the channel that
+            // makes a plucked violin a short sound. Cremer's termination,
+            // fitted to a violin A string and given by Woodhouse (On the
+            // playability of violins I, Acustica 78, eq. 14 and 21): the
+            // bridge presents Y = i w Y0 / (MU + i w LAMBDA), so the share of
+            // its own admittance the string sees taken at mode n is
+            // w^2 LAMBDA / (MU^2 + w^2 LAMBDA^2), lost once per round trip and
+            // f0 round trips a second. Without it the string keeps everything
+            // but its internal losses and rings like a harp.
+            const LAMBDA: f32 = 39.0;
+            const MU: f32 = 4.0e5;
             let t60law = move |k: usize| -> f32 {
                 let kf = k as f32;
                 let sk = stiff * kf * kf;
                 let wn = std::f32::consts::TAU * f0 * kf * (1.0 + sk).sqrt();
                 let eta = (eta_f + eta_a / wn + sk * ETA_B) / (1.0 + sk);
-                (6.9078 / (eta * wn * 0.5)).max(0.005)
+                let wl = wn * LAMBDA;
+                let body = 2.0 * f0 * (wn * wn * LAMBDA / (MU * MU + wl * wl));
+                (6.9078 / (eta * wn * 0.5 + body)).max(0.005)
             };
             self.modal.noise_amt = 0.0;
             self.modal.set_voice_t60(self.freq_hz, stiff, p, &t60law);

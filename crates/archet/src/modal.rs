@@ -172,7 +172,11 @@ impl ModalString {
         for i in 0..self.n {
             let k = (i + 1) as f64;
             let w0 = 2.0 * std::f64::consts::PI * f0d * k * (1.0 + stiffd * k * k).sqrt();
-            let rn = (6.9078 / t60(i + 1).max(0.05)) as f64;
+            // 5 ms, not 50: a plucked string's top partials are gone in far
+            // less than a twentieth of a second, and a floor here caps exactly
+            // what the caller's loss law is for. It stays only to keep a zero
+            // out of the divide.
+            let rn = (6.9078 / t60(i + 1).max(0.005)) as f64;
             let wn2 = (w0 * w0 - rn * rn).max(1.0);
             let wn = wn2.sqrt();
             let theta = wn * dt;
