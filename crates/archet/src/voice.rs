@@ -103,6 +103,11 @@ pub struct ArchetVoice {
     pink_amp: Pink,    // amplitude shimmer
     pink_bow: Pink,    // bow-pressure -> time-varying brightness (spectral flux)
     shimmer: f32,      // current 1/f amplitude-shimmer gain
+    // The string a plucked note occupies, as (instrument, string), so the next
+    // note on that string can end it; and whether it has been ended that way.
+    on_string: Option<(usize, usize)>,
+    stopped: bool,
+    stop_damp: f32, // per-sample modal decay once a finger lands on the string
 
     pub note: Option<u8>,
     /// Monotonic note-on sequence number (set by the engine): note_off releases only
@@ -222,6 +227,13 @@ impl ArchetVoice {
             bow_force: 0.0,
             bow_dir: 1.0,
             force_dip: 1.0,
+            on_string: None,
+            stopped: false,
+            // A finger landing re-terminates the string: what rang before is no
+            // longer a mode of the new length. How fast it dies under the
+            // finger is not measured anywhere; this is of the order of the
+            // onset ceiling Melka measured on pizzicato, and it is a choice.
+            stop_damp: (0.1f32).powf(1.0 / (0.004 * sr)),
             stroke: 0.3,
             stroke_rise_t: 0.03,
             stroke_fall_t: 0.06,
@@ -322,7 +334,23 @@ impl ArchetVoice {
     /// note's PITCH (a violin can't play below G3; cellos/basses carry the low notes)
     /// so ONE engine renders a full-range composite desk; otherwise the fixed patch
     /// instrument. Bands: >=G3(55) violin | C3..F#3 viola | C2..B2 cello | <C2 bass.
-    fn inst_for(note: u8, patch: &ArchetPatch) -> usize {
+    /// The string a note is played on, in first position: the highest open
+    /// string at or below it. Returns that string's index, its open frequency
+    /// and the instrument's sounding length, from which the sounding length of
+    /// a stopped note follows. Tunings are the standard ones; lengths are
+    /// Fletcher and Rossing, The Physics of Musical Instruments, Springer 1991,
+    /// table 10.1 (after Hutchins 1980), at the middle of each range.
+    pub(crate) fn string_for(body_index: usize, note: u8) -> (usize, f32, f32) {
+        let (opens, length_m): (&[u8; 4], f32) = match body_index {
+            0 => (&[55, 62, 69, 76], 0.327), // violin: G3 D4 A4 E5
+            1 => (&[48, 55, 62, 69], 0.375), // viola: C3 G3 D4 A4
+            2 => (&[36, 43, 50, 57], 0.685), // cello: C2 G2 D3 A3
+            _ => (&[28, 33, 38, 43], 1.105), // double bass: E1 A1 D2 G2
+        };
+        let string = opens.iter().rposition(|&o| o <= note).unwrap_or(0);
+        (string, Self::freq_of(opens[string]), length_m)
+    }
+    pub(crate) fn inst_for(note: u8, patch: &ArchetPatch) -> usize {
         if patch.auto_range {
             match note {
                 n if n >= 55 => 0,
@@ -555,11 +583,12 @@ impl ArchetVoice {
         if patch.pluck {
             // PUBLISHED-MODEL pluck (Välimäki/Penttinen EURASIP 2004, complete
             // architecture -- no fragments):
-            // (a) pluck point: a violinist plucks at the end of the
-            // fingerboard, a fifth of the sounding length from the bridge and
-            // roughly there whatever the note. A harpsichord's jack moves with
-            // the compass because the jack rail is fixed and the string is not;
-            // a finger does not.
+            // (a) pluck point: the hand sits at the end of the fingerboard
+            // whatever the note, about a fifth of the OPEN length from the
+            // bridge, and stopping shortens the length that sounds. So the
+            // point is a fixed spot, and the fraction of the sounding length
+            // it falls at grows with the pitch played on that string; the
+            // fraction, not the spot, is what sets the comb.
             // A point release at an exact fraction 1/d of the length puts the
             // pluck on a node of modes d, 2d, 3d and gives them zero amplitude,
             // so a fifth destroys the 5th, 10th and 15th harmonics and the note
@@ -574,8 +603,16 @@ impl ArchetVoice {
             // Experimentally-based description of harp plucking, JASA 2012). So
             // draw it per note over that span, which leaves the comb in place
             // for each note and moves it from note to note, as a hand does. No
-            // published measurement pins the centre for a violin, so it stays.
-            let p = 0.20f32 + self.hum.next() * 0.01;
+            // published measurement pins the spot for a violin, so it stays at
+            // a fifth of the open length. The spread is half a percent each
+            // way, and the fraction folds about the middle, where the comb is
+            // symmetric.
+            let (string, f_open, l_open) = Self::string_for(self.inst_idx, note);
+            self.on_string = Some((self.inst_idx, string));
+            self.stopped = false;
+            let spot = 0.20 * Self::freq_of(note) / f_open;
+            let spot = if spot > 0.5 { 1.0 - spot } else { spot };
+            let p = (spot + self.hum.next() * 0.005).clamp(0.02, 0.5);
             // (b) the same string the bow uses, with the same stiffness law.
             let (_, _, stiff, _) = Self::modal_params(self.inst_idx, self.freq_hz);
             // (c) per-partial decay from the string's losses rather than a
@@ -625,22 +662,14 @@ impl ArchetVoice {
             // over twice the span (Chadefaux, Le Carrou and Fabre, JASA 2012,
             // eq. 10), the width of a finger in contact with a string being
             // measured there at about two centimetres. The wave speed is twice
-            // the length times the fundamental, so the corner sits at a FIXED
-            // HARMONIC RANK -- length over width -- whatever the note, and the
-            // rank differs between instruments because one finger spans less of
-            // a longer string. The law this replaces lowered the corner in
-            // frequency as the pitch rose, which left a top string with almost
-            // nothing above its third harmonic. Sounding lengths from Fletcher
-            // and Rossing, The Physics of Musical Instruments, Springer 1991,
-            // table 10.1 (after Hutchins 1980), at the middle of each range.
+            // the OPEN length times the open-string frequency, a property of
+            // the string and not of the note, so the corner is fixed in hertz
+            // on each string: a fixed harmonic rank on the open string, and a
+            // lower rank the higher a note is stopped, which is why a high
+            // stopped pizzicato is rounder than an open one. It differs between
+            // instruments because one finger spans less of a longer string.
             const FINGER_M: f32 = 0.020;
-            let length_m = match self.inst_idx {
-                0 => 0.327, // violin
-                1 => 0.375, // viola
-                2 => 0.685, // cello
-                _ => 1.105, // double bass
-            };
-            let plp = self.freq_hz * (length_m / FINGER_M);
+            let plp = l_open * f_open / FINGER_M;
             // 116, where the force path used 0.6. A release is not quieter by
             // mistake: the bridge force sums the modes weighted by k, so the
             // old impulse drew most of its loudness from upper partials it had
@@ -765,6 +794,21 @@ impl ArchetVoice {
         self.note = None;
     }
 
+    /// The string a plucked note occupies, or none for a bowed one.
+    pub fn on_string(&self) -> Option<(usize, usize)> {
+        self.on_string
+    }
+
+    /// A finger has landed on this voice's string for another note: end it.
+    pub fn stop_string(&mut self) {
+        self.stopped = true;
+    }
+
+    /// Whether a finger landing on its string has ended this plucked note.
+    pub fn stopped(&self) -> bool {
+        self.stopped
+    }
+
     pub fn is_releasing(&self) -> bool {
         self.releasing
     }
@@ -835,7 +879,9 @@ impl ArchetVoice {
         // leaves the string and the note decays by its own losses, where a
         // harpsichord drops a damper on key release.
         if patch.pluck {
-            self.modal.release_damp = 1.0;
+            // Nothing damps a plucked note on key release; only a finger
+            // landing on the same string ends it.
+            self.modal.release_damp = if self.stopped { self.stop_damp } else { 1.0 };
             // the finger's release scrape, fed into the string
             if self.exc_pos < self.exc_buf.len() {
                 let e = self.exc_buf[self.exc_pos];

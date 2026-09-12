@@ -262,6 +262,19 @@ impl ArchetEngine {
                     if !self.held_keys.contains(&note) { self.held_keys.push(note); }
                     self.note_seq += 1;
                     let seq = self.note_seq;
+                    // A plucked string carries one note. The finger that stops
+                    // the next one ends whatever still rings on that string,
+                    // whether the new note sounds through a unison or alone.
+                    if self.patch.pluck {
+                        let inst = ArchetVoice::inst_for(note, &self.patch);
+                        let (string, _, _) = ArchetVoice::string_for(inst, note);
+                        let poly = (self.patch.polyphony as usize).min(MAX_VOICES);
+                        for v in self.voices[..poly].iter_mut() {
+                            if v.is_active() && v.on_string() == Some((inst, string)) {
+                                v.stop_string();
+                            }
+                        }
+                    }
                     if self.patch.ensemble >= 1.5 {
                         self.fire_unison(note, vel, seq);
                     } else {
@@ -1092,6 +1105,107 @@ mod profile {
         (172.0, s)
     }
 
+    /// Whether a finger landing on a string ends the note still ringing on it.
+    ///
+    /// Two notes on the G string, then the same first note followed by one on
+    /// the D string, and in each case the first note's third partial read
+    /// before and after the second attack. That partial is chosen to sit
+    /// between the second note's harmonics, tens of hertz from the nearest,
+    /// so it can be read through a narrow window without the new note leaking
+    /// into it. A fundamental read the same way could not tell: the new note's
+    /// harmonics sit close enough to set a floor of a few tens of dB, which is
+    /// where a first attempt at this measurement landed.
+    ///   cargo test --lib engine::profile::pizz_stop -- --ignored --nocapture
+    #[test]
+    #[ignore = "diagnostic — run with --ignored"]
+    fn pizz_stop() {
+        let sr = 48_000.0_f32;
+        let block = 512usize;
+        let bank = crate::patch::ArchetPatch::factory_presets();
+        let preset = bank
+            .iter()
+            .find(|p| p.name == "Violin Pizzicato")
+            .expect("the bank no longer has Violin Pizzicato");
+        // A stopped note on the G string, read at its third partial. An open
+        // string would not do: the engine keeps sympathetic open strings that
+        // ring on at exactly those partials after the voice itself is ended,
+        // and a probe on that grid reads them, not the voice. This partial
+        // sits tens of hertz from every open-string harmonic and from every
+        // harmonic of both second notes.
+        let first = 58u8; // Bb3, stopped on the G string
+        let partial = 3.0 * 440.0 * 2f32.powf((first as f32 - 69.0) / 12.0);
+        println!("  second note   string   before  +150 ms   +300 ms");
+        for (second, which) in [(60u8, "same (G)"), (67u8, "other (D)")] {
+            let (mut eng, tx, _mr) = ArchetEngine::new_for_plugin(sr);
+            let mut p = preset.clone();
+            p.polyphony = 8;
+            tx.send(ArchetCommand::LoadPatch(Box::new(p))).unwrap();
+            tx.send(ArchetCommand::NoteOn(first, 100)).unwrap();
+            let mut out: Vec<f32> = Vec::new();
+            let mut buf = vec![0.0f32; block * 2];
+            let gap = (0.4 * sr) as usize / block;
+            for _ in 0..gap {
+                buf.fill(0.0);
+                eng.process_audio(&mut buf, 2);
+                for i in 0..block {
+                    out.push(buf[i * 2]);
+                }
+            }
+            let at = out.len();
+            tx.send(ArchetCommand::NoteOn(second, 100)).unwrap();
+            // One block in, say what the engine holds: which voices ring, on
+            // which string, and whether the new attack ended any of them.
+            buf.fill(0.0);
+            eng.process_audio(&mut buf, 2);
+            for i in 0..block {
+                out.push(buf[i * 2]);
+            }
+            for (i, v) in eng.voices.iter().enumerate().take(8) {
+                if v.is_active() {
+                    println!(
+                        "    voice {i}: note {:?}, on {:?}, stopped {}",
+                        v.note,
+                        v.on_string(),
+                        v.stopped()
+                    );
+                }
+            }
+            for _ in 1..((0.6 * sr) as usize / block) {
+                buf.fill(0.0);
+                eng.process_audio(&mut buf, 2);
+                for i in 0..block {
+                    out.push(buf[i * 2]);
+                }
+            }
+            // A Hann-windowed heterodyne on the first note's third partial. A
+            // rectangular window leaks the fresh second note through its
+            // sidelobes and swamps the old partial; Hann puts a harmonic tens
+            // of hertz away far below anything the old partial can fall to.
+            let win = (0.10 * sr) as usize;
+            let level = |centre: usize| -> f32 {
+                let lo = centre.saturating_sub(win / 2);
+                let hi = (lo + win).min(out.len());
+                let (mut re, mut im) = (0.0f64, 0.0f64);
+                for (k, &s) in out[lo..hi].iter().enumerate() {
+                    let w = 0.5 - 0.5 * (2.0 * std::f64::consts::PI * k as f64 / win as f64).cos();
+                    let ph = 2.0 * std::f64::consts::PI * partial as f64 * (lo + k) as f64 / sr as f64;
+                    re += w * s as f64 * ph.cos();
+                    im -= w * s as f64 * ph.sin();
+                }
+                (re * re + im * im).sqrt() as f32 / (hi - lo) as f32
+            };
+            let before = level(at - (0.06 * sr) as usize).max(1e-12);
+            let db = |v: f32| 20.0 * (v.max(1e-12) / before).log10();
+            println!(
+                "  {second:>11}   {which:<8} {:>6.1}  {:>+7.1}  {:>+8.1}",
+                0.0,
+                db(level(at + (0.15 * sr) as usize)),
+                db(level(at + (0.30 * sr) as usize))
+            );
+        }
+        println!("  (dB against the level before the second attack; columns at +150 and +300 ms)");
+    }
+
     /// A scored passage, desk by desk, on the solo plucked patches.
     ///
     /// One engine per desk, each on its own instrument's plucked patch with a
@@ -1765,6 +1879,6 @@ mod golden_audio {
             }
         }
         eprintln!("GOLDEN = {h:#018x}");
-        assert_eq!(h, 0xf912_c795_20b0_0174, "the engine's rendered audio changed");
+        assert_eq!(h, 0x670d_56be_7dfd_10be, "the engine's rendered audio changed");
     }
 }
