@@ -353,28 +353,69 @@ impl ArchetVoice {
     /// They carry what no smooth law does: the fundamental rings longest,
     /// neighbouring partials differ several-fold, and the upper partials of
     /// the A and E are gone within a third of a second. A stopped note on the
-    /// string reads the same curve at its own partial frequencies. Only the
-    /// violin is measured; the other instruments keep the fitted law.
+    /// string reads the same curve at its own partial frequencies.
+    ///
+    /// The other three instruments come from the same collection, measured
+    /// the same way, with the reserves their recordings impose: the viola's
+    /// files are noise-gated, so every figure extrapolates a short window of
+    /// decay before the gate; the cello's and bass's floor sits only some
+    /// thirty dB under the notes; and on the bass every partial of every
+    /// string lies within twenty hertz of a harmonic of the low E, so the
+    /// coincidence rule cannot be met there. A partial is kept when its fit
+    /// is clean and it either sits clear of every other open string's
+    /// harmonics or is shorter than the one it sits on, which a blend cannot
+    /// make it; where a report named the string's own early slope under a
+    /// longer sympathetic partial, that slope is the value.
     pub(crate) fn measured_pizz_t60(body_index: usize, string: usize) -> Option<&'static [(f32, f32)]> {
-        if body_index != 0 {
-            return None;
-        }
-        const G: &[(f32, f32)] = &[
-            (194.7, 5.51), (388.0, 2.15), (780.1, 2.00), (975.4, 2.39),
-            (1171.2, 0.98), (1363.0, 1.41), (1558.2, 1.49),
+        const VIOLIN: [&[(f32, f32)]; 4] = [
+            &[
+                (194.7, 5.51), (388.0, 2.15), (780.1, 2.00), (975.4, 2.39),
+                (1171.2, 0.98), (1363.0, 1.41), (1558.2, 1.49),
+            ],
+            &[(291.0, 3.86), (581.4, 2.47), (871.4, 1.29), (1163.7, 1.58)],
+            &[(440.2, 3.31), (1755.5, 0.22), (2641.0, 0.27)],
+            &[
+                (657.7, 2.63), (1316.6, 1.02), (1969.2, 0.96), (2633.1, 0.70),
+                (3291.3, 1.22), (3947.5, 0.26),
+            ],
         ];
-        const D: &[(f32, f32)] = &[(291.0, 3.86), (581.4, 2.47), (871.4, 1.29), (1163.7, 1.58)];
-        const A: &[(f32, f32)] = &[(440.2, 3.31), (1755.5, 0.22), (2641.0, 0.27)];
-        const E: &[(f32, f32)] = &[
-            (657.7, 2.63), (1316.6, 1.02), (1969.2, 0.96), (2633.1, 0.70),
-            (3291.3, 1.22), (3947.5, 0.26),
+        const VIOLA: [&[(f32, f32)]; 4] = [
+            &[
+                (130.2, 12.0), (260.0, 13.1), (391.8, 2.90), (522.7, 2.63),
+                (652.1, 1.19), (784.6, 1.65), (913.7, 1.27), (1049.6, 1.44),
+            ],
+            &[(194.8, 5.16), (978.1, 1.37), (1177.3, 1.19), (1368.0, 1.67)],
+            &[(292.5, 3.48), (879.0, 2.01), (1466.6, 1.19), (1763.7, 0.71), (2053.7, 0.48)],
+            &[(438.0, 1.22), (881.5, 3.19), (1317.7, 1.23), (2194.9, 0.66), (3077.4, 0.81)],
         ];
-        Some(match string {
-            0 => G,
-            1 => D,
-            2 => A,
-            _ => E,
-        })
+        const CELLO: [&[(f32, f32)]; 4] = [
+            &[(65.8, 7.08), (130.6, 5.13), (261.9, 5.54), (328.6, 3.25), (460.2, 2.86), (526.6, 1.68)],
+            &[
+                (98.1, 9.63), (490.2, 3.48), (588.5, 3.12), (687.4, 3.36),
+                (786.3, 0.96), (883.4, 1.20), (982.1, 1.37),
+            ],
+            &[(145.4, 8.52), (292.4, 1.91), (439.9, 2.24), (733.0, 2.67), (1027.7, 1.65), (1466.9, 1.44)],
+            &[(219.2, 2.86), (438.9, 3.75), (658.7, 1.41), (1096.8, 1.88), (1537.8, 2.26), (1755.5, 0.97)],
+        ];
+        const BASS: [&[(f32, f32)]; 4] = [
+            &[(41.0, 10.8), (81.6, 9.00), (124.7, 3.06)],
+            &[(54.5, 6.68), (110.4, 1.23), (220.6, 2.73), (387.7, 1.30), (444.6, 1.09)],
+            &[
+                (72.7, 11.4), (145.8, 6.49), (219.0, 4.60), (292.0, 7.95), (365.3, 3.98),
+                (438.0, 3.93), (584.3, 2.69), (661.4, 0.94), (730.8, 1.52),
+            ],
+            &[
+                (96.5, 2.19), (195.3, 2.0), (293.3, 4.15), (390.9, 4.79), (489.1, 5.53),
+                (685.8, 3.33), (784.5, 1.24), (982.4, 1.37),
+            ],
+        ];
+        let tables = match body_index {
+            0 => &VIOLIN,
+            1 => &VIOLA,
+            2 => &CELLO,
+            _ => &BASS,
+        };
+        Some(tables[string.min(3)])
     }
 
     /// Decay time at a frequency, from a measured table: straight in log

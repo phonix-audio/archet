@@ -640,6 +640,58 @@ mod profile {
         println!("wrote /tmp/archet_pizz_{{G3,D4,A4,E5}}.wav");
     }
 
+    /// The lowest open string of each instrument, plucked and left to ring,
+    /// long enough for a bass to show its decay.
+    ///
+    /// One note per instrument on its plucked patch, the viola borrowing the
+    /// violin's with the instrument changed, six seconds each, written out so
+    /// each partial's decay can be read against the measured table it comes
+    /// from. The violin harness stops at three seconds and covers only the
+    /// violin.
+    ///   cargo test --lib engine::profile::pizz_family -- --ignored --nocapture
+    #[test]
+    #[ignore = "diagnostic — run with --ignored"]
+    fn pizz_family() {
+        use crate::patch::{ArchetPatch, Instrument};
+        let sr = 48_000.0_f32;
+        let block = 512usize;
+        let bank = ArchetPatch::factory_presets();
+        let find = |n: &str| {
+            bank.iter()
+                .find(|p| p.name == n)
+                .unwrap_or_else(|| panic!("the bank no longer has {n}"))
+                .clone()
+        };
+        let mut viola = find("Violin Pizzicato");
+        viola.instrument = Instrument::Viola;
+        let cases = [
+            ("violin", find("Violin Pizzicato"), 55u8),
+            ("viola", viola, 48),
+            ("cello", find("Cello Pizzicato"), 36),
+            ("bass", find("Bass Pizzicato"), 28),
+        ];
+        for (name, preset, pitch) in cases {
+            let (mut eng, tx, _mr) = ArchetEngine::new_for_plugin(sr);
+            let mut p = preset;
+            p.polyphony = 1;
+            tx.send(ArchetCommand::LoadPatch(Box::new(p))).unwrap();
+            tx.send(ArchetCommand::NoteOn(pitch, 100)).unwrap();
+            let mut out: Vec<f32> = Vec::new();
+            let mut buf = vec![0.0f32; block * 2];
+            for _ in 0..((6.0 * sr) as usize / block) {
+                buf.fill(0.0);
+                eng.process_audio(&mut buf, 2);
+                for i in 0..block {
+                    out.push(buf[i * 2]);
+                }
+            }
+            let peak = out.iter().fold(0.0f32, |m, x| m.max(x.abs()));
+            println!("  {name:<7} note {pitch:>3}  peak {peak:.4}");
+            write_wav(&format!("/tmp/archet_pizz_family_{name}.wav"), &out, sr);
+        }
+        println!("wrote /tmp/archet_pizz_family_{{violin,viola,cello,bass}}.wav");
+    }
+
     /// Whether the pluck position really moves from one note to the next.
     ///
     /// One pitch plucked over and over, with a gap long enough that each note
@@ -1890,6 +1942,6 @@ mod golden_audio {
             }
         }
         eprintln!("GOLDEN = {h:#018x}");
-        assert_eq!(h, 0x7fac_5f3e_6a7d_61ea, "the engine's rendered audio changed");
+        assert_eq!(h, 0xc8bd_c74a_a098_fd3a, "the engine's rendered audio changed");
     }
 }
