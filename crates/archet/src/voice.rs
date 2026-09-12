@@ -186,8 +186,11 @@ impl ArchetVoice {
             // rosin-scratch mix into the modal bridge (the calibrated value).
             modal_scratch: 0.4,
             modal_recalc: 0,
-            // decay-to-10% in ~150 ms on bow-off (real détaché), vs the ~500 ms natural
-            // modal ring that made short notes sound plucked.
+            // Decay to a tenth on bow-off, against the long natural modal ring
+            // that made short notes sound plucked. Only the value a voice holds
+            // until its first note-off: from then on `note_off` derives it from
+            // the patch, and the time written here is the shorter of the two a
+            // detache stroke wants.
             modal_release_factor: (0.1f32).powf(1.0 / (0.08 * sr)),
             modal_pitch_gain: 1.0,
             friction: Friction::new(sr),
@@ -743,6 +746,15 @@ impl ArchetVoice {
         // started sounding — cancel the pending attack (the fade keeps
         // running to zero, then the voice silences; see process()).
         self.steal_pending = None;
+        // The RELEASE control is in seconds and a bow's release is a per-sample
+        // modal decay, so derive one from the other here. It was frozen at
+        // construction, which no automation and no preset could ever reach:
+        // the control was shown, stored and automated, and moved nothing.
+        // A plucked string is untouched, `process` returning on that path
+        // before this factor is ever applied -- a finger leaving a string
+        // damps nothing.
+        let secs = patch.release.clamp(0.01, 1.0);
+        self.modal_release_factor = (0.1f32).powf(1.0 / (secs * self.sr));
         self.releasing = true;
         self.note = None;
     }
