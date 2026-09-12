@@ -469,7 +469,13 @@ impl ArchetVoice {
         // the section so no two strokes share a shape.
         let lowi = self.inst_idx >= 2;
         self.stroke_rise_t = ((0.055 - 0.047 * v) * (1.0 + r5 * 0.25 * js)).clamp(0.008, 0.090);
-        self.stroke_fall_t = ((if lowi { 0.085 } else { 0.055 }) * (1.0 + r6 * 0.20 * js)).max(0.03);
+        // The release control belongs HERE, not only on the ring-out: what a
+        // listener hears as the end of a bowed note is the gesture's fall, the
+        // bow decelerating off the string. Amplitude follows the stroke, whose
+        // time constant is a third of this, so the control spans a real range.
+        // Low strings take longer to let go, and the per-note spread stays.
+        let fall = patch.release.clamp(0.02, 0.9) * if lowi { 1.55 } else { 1.0 };
+        self.stroke_fall_t = (fall * (1.0 + r6 * 0.20 * js)).max(0.03);
         self.stroke_floor = (if lowi { 0.65 } else { 0.80 }) * (1.0 + r5 * 0.05);
         self.stroke_tau = (if lowi { 0.8 } else { 1.2 }) * (1.0 + r6 * 0.20);
     }
