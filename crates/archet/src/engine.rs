@@ -531,13 +531,68 @@ mod preset_sweep_tests {
 mod profile {
     use super::*;
 
+    /// How long a pizzicato actually rings, on each open violin string.
+    ///
+    /// One note, plucked and left alone, per string; prints the times to
+    /// -20 and -40 dB and the T60 fitted between them, and writes the audio.
+    /// `pluck_repeat` cannot answer this: its notes overlap by design, so its
+    /// tail is never one string's own decay.
+    ///   cargo test --release --lib engine::profile::pizz_decay -- --ignored --nocapture
+    #[test]
+    #[ignore = "diagnostic — run with --ignored"]
+    fn pizz_decay() {
+        let sr = 48_000.0_f32;
+        let bank = crate::patch::ArchetPatch::factory_presets();
+        let preset = bank
+            .iter()
+            .find(|p| p.name == "Violin Pizzicato")
+            .expect("the bank no longer has Violin Pizzicato");
+        // The four open violin strings, each plucked once and left to ring.
+        // `pluck_repeat` cannot show a decay: its notes overlap by design.
+        println!("  string   note     -20 dB    -40 dB    fitted T60");
+        for (name, pitch) in [("G3", 55u8), ("D4", 62), ("A4", 69), ("E5", 76)] {
+            let (mut eng, tx, _mr) = ArchetEngine::new_for_plugin(sr);
+            let mut p = preset.clone();
+            p.polyphony = 1;
+            tx.send(ArchetCommand::LoadPatch(Box::new(p))).unwrap();
+            tx.send(ArchetCommand::NoteOn(pitch, 100)).unwrap();
+            let block = 512usize;
+            let mut out: Vec<f32> = Vec::new();
+            let mut buf = vec![0.0f32; block * 2];
+            for _ in 0..((3.0 * sr) as usize / block) {
+                buf.fill(0.0);
+                eng.process_audio(&mut buf, 2);
+                for i in 0..block { out.push(buf[i * 2]); }
+            }
+            // envelope in 10 ms hops, referenced to the peak
+            let hop = (0.01 * sr) as usize;
+            let env: Vec<f32> = out
+                .chunks(hop)
+                .map(|c| (c.iter().map(|x| x * x).sum::<f32>() / c.len() as f32).sqrt())
+                .collect();
+            let peak = env.iter().cloned().fold(0.0f32, f32::max).max(1e-12);
+            let at = |target_db: f32| -> f32 {
+                env.iter()
+                    .position(|&e| 20.0 * (e / peak).log10() <= target_db)
+                    .map(|i| i as f32 * 0.01)
+                    .unwrap_or(f32::NAN)
+            };
+            let (t20, t40) = (at(-20.0), at(-40.0));
+            let t60 = if t20.is_finite() && t40.is_finite() && t40 > t20 {
+                60.0 * (t40 - t20) / 20.0
+            } else {
+                f32::NAN
+            };
+            println!("  {name:>6}   {pitch:>4}   {t20:7.2} s {t40:7.2} s   {t60:7.2} s");
+            write_wav(&format!("/tmp/archet_pizz_{name}.wav"), &out, sr);
+        }
+        println!("wrote /tmp/archet_pizz_{{G3,D4,A4,E5}}.wav");
+    }
+
     /// Acoustic-fit harness: render the violin patch at G3/D4/A4/D5/A5 ->
     /// /tmp/archet_<pitch>.wav, so the harmonic envelope can be measured and
-    /// the body/string tuning driven OBJECTIVELY (no listening). What it is
-    /// measured against belongs in the acoustics literature, not in a
-    /// sampler: the body's own targets are the published signature modes and
-    /// Duennwald's band profile, which `body::tests::dunnwald` prints.
-    ///   cargo test --lib archet::engine::profile::violin_fit -- --ignored --nocapture
+    /// the body/string tuning driven OBJECTIVELY (no listening).
+    ///   cargo test --lib engine::profile::violin_fit -- --ignored --nocapture
     #[test]
     #[ignore = "diagnostic — run with --ignored"]
     fn violin_fit() {
@@ -565,7 +620,7 @@ mod profile {
     /// Expression test: play D4 at rising velocities (a dynamic phrase) so a
     /// Python script can confirm loudness AND brightness vary note-to-note (the
     /// objective signature of "not mechanical"). -> /tmp/archet_phrase.wav
-    ///   cargo test --lib archet::engine::profile::phrase_dyn -- --ignored --nocapture
+    ///   cargo test --lib engine::profile::phrase_dyn -- --ignored --nocapture
     #[test]
     #[ignore = "diagnostic — run with --ignored"]
     fn phrase_dyn() {
@@ -592,7 +647,7 @@ mod profile {
 
     /// Diagnose articulation: a quick DETACHE note (does it sustain like a bow, or
     /// peak-then-decay like a pizzicato?) and a slurred LEGATO pair (smooth?).
-    ///   cargo test --release --lib archet::engine::profile::detache_legato -- --ignored --nocapture
+    ///   cargo test --release --lib engine::profile::detache_legato -- --ignored --nocapture
     #[test]
     #[ignore = "diagnostic"]
     fn detache_legato() {
@@ -711,7 +766,7 @@ mod profile {
     /// The worst case for a pizzicato: REPEATED 16ths on one pitch. Wants
     /// every onset distinct (no choking from the predecessor's note-off) and
     /// no smear buildup.
-    ///   cargo test --release --lib archet::engine::profile::pluck_repeat -- --ignored --nocapture
+    ///   cargo test --release --lib engine::profile::pluck_repeat -- --ignored --nocapture
     #[test]
     #[ignore = "diagnostic"]
     fn pluck_repeat() {
@@ -755,7 +810,7 @@ mod profile {
     /// Full-range fit: render Archet for EACH instrument (violin/viola/cello/bass)
     /// across its real range -> /tmp/archetf_<inst>_<pitch>.wav, so each register
     /// can be measured for the body's published band targets.
-    ///   cargo test --lib archet::engine::profile::full_range_fit -- --ignored --nocapture
+    ///   cargo test --lib engine::profile::full_range_fit -- --ignored --nocapture
     #[test]
     #[ignore = "diagnostic — run with --ignored"]
     fn full_range_fit() {
@@ -786,7 +841,7 @@ mod profile {
 
     /// Isolate the Archet DOUBLE BASS at real low pitches, to hear whether it
     /// behaves like a bowed string or a synth saw. -> /tmp/archet_bass_<pitch>.wav
-    ///   cargo test --lib archet::engine::profile::dump_bass -- --ignored --nocapture
+    ///   cargo test --lib engine::profile::dump_bass -- --ignored --nocapture
     #[test]
     #[ignore = "diagnostic — run with --ignored"]
     fn dump_bass() {
@@ -808,7 +863,7 @@ mod profile {
     }
 
     /// De-risk: render a held D4 (violin) -> /tmp/archet_bow.wav.
-    ///   cargo test --lib archet::engine::profile::bow_derisk -- --ignored --nocapture
+    ///   cargo test --lib engine::profile::bow_derisk -- --ignored --nocapture
     #[test]
     #[ignore = "diagnostic — run with --ignored"]
     fn bow_derisk() {
