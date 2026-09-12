@@ -177,7 +177,7 @@ impl ArchetApp {
             cpu: Some(self.cached_meter.cpu_percent / 100.0),
             preset_salt: "archet",
             // What the panel's own nameplate used to print under this bar.
-            subtitle: Some("A BOW ON A STRING, THROUGH A BODY"),
+            subtitle: Some("BOWED STRINGS"),
             patch_name: None, buttons: &[],
             mode_pills: &[],
             status_right: Some(&status),
