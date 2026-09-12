@@ -366,7 +366,7 @@ impl ArchetVoice {
     /// harmonics or is shorter than the one it sits on, which a blend cannot
     /// make it; where a report named the string's own early slope under a
     /// longer sympathetic partial, that slope is the value.
-    pub(crate) fn measured_pizz_t60(body_index: usize, string: usize) -> Option<&'static [(f32, f32)]> {
+    pub(crate) fn measured_pizz_t60(body_index: usize, string: usize) -> &'static [(f32, f32)] {
         const VIOLIN: [&[(f32, f32)]; 4] = [
             &[
                 (194.7, 5.51), (388.0, 2.15), (780.1, 2.00), (975.4, 2.39),
@@ -415,7 +415,7 @@ impl ArchetVoice {
             2 => &CELLO,
             _ => &BASS,
         };
-        Some(tables[string.min(3)])
+        tables[string.min(3)]
     }
 
     /// Decay time at a frequency, from a measured table: straight in log
@@ -494,40 +494,6 @@ impl ArchetVoice {
         (b1 * b1m, b2 * b2m, stiff, beta)
     }
 
-    /// The string's own loss coefficients, for the plucked articulation:
-    /// friction (internal) and air, with bending shared. Woodhouse, Plucked
-    /// guitar transients, Acta Acustica 90 (2004), eq. 8: the loss factor of
-    /// mode n is
-    ///
-    ///   eta_n = [eta_F + eta_A / w_n + s n^2 eta_B] / [1 + s n^2]
-    ///
-    /// in this crate's normalisation, where `s` is the stiffness already used
-    /// for the mode frequencies. The FORM is published; the values are fitted,
-    /// measured violin coefficients (Pickering, Catgut Acoust. Soc. J. 44,
-    /// 1985) not being freely available.
-    ///
-    /// Violin and viola are fitted to the one decay SHAPE measured on this
-    /// family -- decay time inversely proportional to frequency (Powell,
-    /// Acoustic Analysis of the Viola, NSF REU, UIUC 2012, fitted exponent
-    /// -1.006) -- each anchored at its own lowest open string, so the overall
-    /// character is untouched and only the pitch dependence moves. The air
-    /// term's damping RATE is eta_A / 2, the same at every pitch, so an
-    /// oversized eta_A flattens the whole law: that is what kept the middle
-    /// register ringing on like a plucked zither instead of a violin.
-    ///
-    /// Cello and bass keep the older fit. The same procedure reaches the shape
-    /// for them too, but only by driving their air term to nearly nothing,
-    /// where the loss tables in the paper above hold the air coefficient
-    /// roughly constant across strings and let friction vary widely. Their
-    /// decay stays nearly pitch independent, which is a defect still open.
-    fn string_losses(body_index: usize) -> (f32, f32) {
-        match body_index {
-            0 => (3.364e-3, 2.486), // violin
-            1 => (6.150e-3, 0.774), // viola
-            2 => (8.169e-4, 5.13),  // cello
-            _ => (9.752e-4, 5.18),  // double bass
-        }
-    }
     fn freq_tuned(note: u8, patch: &ArchetPatch) -> f32 {
         Self::freq_of(note) * 2f32.powf(patch.tune_cents / 1200.0)
     }
@@ -715,43 +681,15 @@ impl ArchetVoice {
             let p = (spot + self.hum.next() * 0.005).clamp(0.02, 0.5);
             // (b) the same string the bow uses, with the same stiffness law.
             let (_, _, stiff, _) = Self::modal_params(self.inst_idx, self.freq_hz);
-            // (c) per-partial decay from the string's losses rather than a
-            // fitted curve: friction, air and bending, combined by Woodhouse's
-            // eq. 8 (see `string_losses`). The curve this replaces floored
-            // every partial at 100 ms, so a top-string pizzicato kept its high
-            // modes alive a tenth of a second at every pitch; the losses let
-            // mode 40 die in 16 ms up there, which is what a plucked string
-            // does. Its cosine ripple is gone with it: real strings ripple
-            // because the two polarisations beat, and this model has one
-            // polarisation, so the ripple was decoration.
-            let (eta_f, eta_a) = Self::string_losses(self.inst_idx);
-            const ETA_B: f32 = 2.0e-2;
+            // (c) per-partial decay: the measured curve of the string this
+            // note is on, read at each partial's own frequency, stiffness
+            // included (see `measured_pizz_t60`).
             let f0 = self.freq_hz;
-            // (d) and the body drains the string, which is the channel that
-            // makes a plucked violin a short sound. Cremer's termination,
-            // fitted to a violin A string and given by Woodhouse (On the
-            // playability of violins I, Acustica 78, eq. 14 and 21): the
-            // bridge presents Y = i w Y0 / (MU + i w LAMBDA), so the share of
-            // its own admittance the string sees taken at mode n is
-            // w^2 LAMBDA / (MU^2 + w^2 LAMBDA^2), lost once per round trip and
-            // f0 round trips a second. Without it the string keeps everything
-            // but its internal losses and rings like a harp.
-            const LAMBDA: f32 = 39.0;
-            const MU: f32 = 4.0e5;
-            // The measured curve of the string this note is on, where one
-            // exists; the fitted law otherwise.
             let measured = Self::measured_pizz_t60(self.inst_idx, string);
             let t60law = move |k: usize| -> f32 {
                 let kf = k as f32;
                 let sk = stiff * kf * kf;
-                let wn = std::f32::consts::TAU * f0 * kf * (1.0 + sk).sqrt();
-                if let Some(table) = measured {
-                    return Self::t60_from_table(table, wn / std::f32::consts::TAU);
-                }
-                let eta = (eta_f + eta_a / wn + sk * ETA_B) / (1.0 + sk);
-                let wl = wn * LAMBDA;
-                let body = 2.0 * f0 * (wn * wn * LAMBDA / (MU * MU + wl * wl));
-                (6.9078 / (eta * wn * 0.5 + body)).max(0.005)
+                Self::t60_from_table(measured, f0 * kf * (1.0 + sk).sqrt())
             };
             self.modal.noise_amt = 0.0;
             self.modal.set_voice_t60(self.freq_hz, stiff, p, &t60law);

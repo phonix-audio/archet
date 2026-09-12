@@ -59,9 +59,7 @@ impl SympStrings {
     /// `inst` = body index (0 violin, 1 viola, 2 cello, 3 contrabass).
     ///
     /// Each open string rings for as long as it does when plucked, since it is
-    /// the same string: the violin's decays are the measured ones, from the
-    /// fundamental of each string's table; the other instruments keep the
-    /// former figure until theirs are measured.
+    /// the same string: the fundamental of its measured decay table.
     pub fn new(sr: f32, inst: usize) -> Self {
         let open: &[f32] = match inst {
             1 => &[130.81, 196.0, 293.66, 440.0],  // viola C3 G3 D4 A4
@@ -70,9 +68,7 @@ impl SympStrings {
             _ => &[196.0, 293.66, 440.0, 659.25],  // violin G3 D4 A4 E5
         };
         let t60 = |string: usize| -> f32 {
-            super::voice::ArchetVoice::measured_pizz_t60(inst, string)
-                .map(|table| table[0].1)
-                .unwrap_or(1.5)
+            super::voice::ArchetVoice::measured_pizz_t60(inst, string)[0].1
         };
         Self {
             combs: open
