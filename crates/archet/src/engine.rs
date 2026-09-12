@@ -682,6 +682,86 @@ mod profile {
         println!("wrote /tmp/archet_pizz_register.wav");
     }
 
+    /// A pizzicato phrase, for judging by ear what no measurement settles.
+    ///
+    /// The analysis harnesses force a single voice, so none of them can play a
+    /// line: every note would cut the one before it. A plucked note rings well
+    /// past its written length, and that overlap is most of what makes a
+    /// pizzicato passage sound played rather than tested, so this one keeps
+    /// enough voices for each tail to stand. The line crosses all four strings
+    /// and climbs to the top of the register, where the excitation corner moved
+    /// furthest, and it repeats notes so the pluck position can be heard moving
+    /// between them.
+    ///   cargo test --lib engine::profile::pizz_melody -- --ignored --nocapture
+    #[test]
+    #[ignore = "diagnostic — run with --ignored"]
+    fn pizz_melody() {
+        let sr = 48_000.0_f32;
+        let bank = crate::patch::ArchetPatch::factory_presets();
+        let preset = bank
+            .iter()
+            .find(|p| p.name == "Violin Pizzicato")
+            .expect("the bank no longer has Violin Pizzicato");
+        let (mut eng, tx, _mr) = ArchetEngine::new_for_plugin(sr);
+        let mut p = preset.clone();
+        // Enough voices that a ringing note is never stolen by the next attack:
+        // the longest tail here outlasts several notes of the line.
+        p.polyphony = 8;
+        tx.send(ArchetCommand::LoadPatch(Box::new(p))).unwrap();
+        let beat = 60.0 / 126.0;
+        // pitch, velocity, written length in beats
+        let phrase: &[(u8, u8, f32)] = &[
+            (69, 100, 0.5), (71, 92, 0.5), (72, 96, 0.5), (74, 100, 0.5),
+            (76, 110, 1.0), (76, 88, 0.5), (74, 96, 0.5), (72, 100, 1.0),
+            (69, 104, 1.0),
+            (62, 100, 0.5), (69, 96, 0.5), (65, 100, 0.5), (62, 96, 0.5),
+            (57, 104, 1.0), (55, 108, 1.0), (62, 100, 0.5), (67, 96, 0.5),
+            (81, 104, 0.5), (83, 100, 0.5), (84, 104, 0.5), (86, 100, 0.5),
+            (88, 112, 1.0), (84, 96, 0.5), (81, 100, 0.5), (76, 108, 1.5),
+            (55, 100, 0.5), (62, 100, 0.5), (69, 104, 0.5), (76, 108, 0.5),
+            (81, 112, 2.0),
+        ];
+        let block = 512usize;
+        let mut out: Vec<f32> = Vec::new();
+        let mut buf = vec![0.0f32; block * 2];
+        let written: f32 = phrase.iter().map(|n| n.2).sum::<f32>() * beat;
+        let mut pending: Vec<(f32, u8)> = Vec::new();
+        let mut next = 0usize;
+        let mut onset = 0.0f32;
+        let mut t = 0.0f32;
+        while t < written + 2.5 {
+            while next < phrase.len() && onset <= t {
+                let (pitch, vel, len) = phrase[next];
+                tx.send(ArchetCommand::NoteOn(pitch, vel)).unwrap();
+                pending.push((onset + len * beat, pitch));
+                onset += len * beat;
+                next += 1;
+            }
+            pending.retain(|&(when, pitch)| {
+                if when > t {
+                    return true;
+                }
+                tx.send(ArchetCommand::NoteOff(pitch)).unwrap();
+                false
+            });
+            buf.fill(0.0);
+            eng.process_audio(&mut buf, 2);
+            for i in 0..block {
+                out.push(buf[i * 2]);
+            }
+            t += block as f32 / sr;
+        }
+        let peak = out.iter().fold(0.0f32, |m, x| m.max(x.abs()));
+        let full = out.iter().filter(|x| x.abs() >= 0.999).count();
+        println!(
+            "  {} notes, {:.1} s, peak {peak:.4}, {full} samples at full scale",
+            phrase.len(),
+            out.len() as f32 / sr
+        );
+        write_wav("/tmp/archet_pizz_melody.wav", &out, sr);
+        println!("wrote /tmp/archet_pizz_melody.wav");
+    }
+
     /// Acoustic-fit harness: render the violin patch at G3/D4/A4/D5/A5 ->
     /// /tmp/archet_<pitch>.wav, so the harmonic envelope can be measured and
     /// the body/string tuning driven OBJECTIVELY (no listening).
