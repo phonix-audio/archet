@@ -539,7 +539,22 @@ impl ArchetVoice {
             // roughly there whatever the note. A harpsichord's jack moves with
             // the compass because the jack rail is fixed and the string is not;
             // a finger does not.
-            let p = 0.20f32;
+            // A point release at an exact fraction 1/d of the length puts the
+            // pluck on a node of modes d, 2d, 3d and gives them zero amplitude,
+            // so a fifth destroys the 5th, 10th and 15th harmonics and the note
+            // sounds hollow. Measured spectra never do that: a partial with a
+            // node at the plucking position is strongly attenuated, not absent
+            // (Traube, An interdisciplinary study of the timbre of the classical
+            // guitar, McGill 2004, 4.5.1 -- the whole plucking-point estimation
+            // literature works by fitting the amplitudes left in the valleys).
+            // What is measured is that the position MOVES: between the fingers
+            // of one player it spans up to one percent of the string length, and
+            // its variance grows with register (Chadefaux, Le Carrou and Fabre,
+            // Experimentally-based description of harp plucking, JASA 2012). So
+            // draw it per note over that span, which leaves the comb in place
+            // for each note and moves it from note to note, as a hand does. No
+            // published measurement pins the centre for a violin, so it stays.
+            let p = 0.20f32 + self.hum.next() * 0.01;
             // (b) the same string the bow uses, with the same stiffness law.
             let (_, _, stiff, _) = Self::modal_params(self.inst_idx, self.freq_hz);
             // (c) per-partial decay from the string's losses rather than a
