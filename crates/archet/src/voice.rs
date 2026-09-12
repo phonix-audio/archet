@@ -371,18 +371,30 @@ impl ArchetVoice {
     ///   eta_n = [eta_F + eta_A / w_n + s n^2 eta_B] / [1 + s n^2]
     ///
     /// in this crate's normalisation, where `s` is the stiffness already used
-    /// for the mode frequencies. The FORM is the published one; the values are
-    /// fitted to this instrument's own voicing over its whole range, which is
-    /// what that paper does too. Measured violin coefficients exist (Pickering,
-    /// Catgut Acoust. Soc. J. 44, 1985) but are not freely available; that the
-    /// four fits land within 40% of each other is the check that they are
-    /// string properties and not per-note curve bending.
+    /// for the mode frequencies. The FORM is published; the values are fitted,
+    /// measured violin coefficients (Pickering, Catgut Acoust. Soc. J. 44,
+    /// 1985) not being freely available.
+    ///
+    /// Violin and viola are fitted to the one decay SHAPE measured on this
+    /// family -- decay time inversely proportional to frequency (Powell,
+    /// Acoustic Analysis of the Viola, NSF REU, UIUC 2012, fitted exponent
+    /// -1.006) -- each anchored at its own lowest open string, so the overall
+    /// character is untouched and only the pitch dependence moves. The air
+    /// term's damping RATE is eta_A / 2, the same at every pitch, so an
+    /// oversized eta_A flattens the whole law: that is what kept the middle
+    /// register ringing on like a plucked zither instead of a violin.
+    ///
+    /// Cello and bass keep the older fit. The same procedure reaches the shape
+    /// for them too, but only by driving their air term to nearly nothing,
+    /// where the loss tables in the paper above hold the air coefficient
+    /// roughly constant across strings and let friction vary widely. Their
+    /// decay stays nearly pitch independent, which is a defect still open.
     fn string_losses(body_index: usize) -> (f32, f32) {
         match body_index {
-            0 => (6.814e-4, 5.79), // violin
-            1 => (7.040e-4, 5.25), // viola
-            2 => (8.169e-4, 5.13), // cello
-            _ => (9.752e-4, 5.18), // double bass
+            0 => (3.364e-3, 2.486), // violin
+            1 => (6.150e-3, 0.774), // viola
+            2 => (8.169e-4, 5.13),  // cello
+            _ => (9.752e-4, 5.18),  // double bass
         }
     }
     fn freq_tuned(note: u8, patch: &ArchetPatch) -> f32 {
