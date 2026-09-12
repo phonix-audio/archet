@@ -158,9 +158,10 @@ pub struct ArchetPatch {
     /// choir) -- so the render is ONE engine per MIDI track, not one per pitch-band.
     #[serde(default)]
     pub auto_range: bool,
-    /// PLUCKED articulation (pizzicato): a one-shot plectrum excitation
-    /// then a free modal ring-down -- no bow, no gesture, no vibrato; a damper falls
-    /// on note-off. Constant loudness (a plectrum has no velocity dynamics).
+    /// PLUCKED articulation (pizzicato): a one-shot fingertip excitation then a
+    /// free modal ring-down -- no bow, no gesture, no vibrato. Nothing damps it on
+    /// note-off, because a finger leaves the string and the note decays by its own
+    /// losses. The force follows the velocity: a finger plucks harder or softer.
     #[serde(default)]
     pub pluck: bool,
     #[serde(default = "def_poly")]

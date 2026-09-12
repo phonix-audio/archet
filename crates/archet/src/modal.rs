@@ -153,9 +153,11 @@ impl ModalString {
         self.b00 = if b00.abs() < 1e-12 { 1e-12 } else { b00 };
     }
 
-    /// Configure with an explicit per-partial T60 law (Välimäki 2004: harpsichord
-    /// partial decays are NON-monotonic -- a one-pole trend with a RIPPLE so
-    /// neighboring partials differ; the 2nd partial often outlives the 1st).
+    /// Configure with an explicit per-partial T60 law. A plucked string's partial
+    /// decays are NON-monotonic -- a one-pole trend with a RIPPLE so neighbouring
+    /// partials differ and the 2nd partial often outlives the 1st, which is the
+    /// two polarisations beating rather than anything about one instrument
+    /// (Valimaki 2004 measures it; Woodhouse 2004 derives it).
     /// `t60(k)` returns the decay time (s) of partial k (1-based).
     pub fn set_voice_t60(&mut self, f0: f32, stiff: f32, beta: f32,
                          t60: &dyn Fn(usize) -> f32) {
@@ -197,17 +199,21 @@ impl ModalString {
         (1.0 / self.b00) as f32
     }
 
-    /// PLUCK: one-shot force injection at the excitation point (beta). A plectrum
-    /// pluck is a displacement step at the pluck point -- exactly one application of
-    /// the per-mode force add, then a free linear ring-down with the per-partial
-    /// decay. (The harpsichord case: the EASY case of the modal string.)
+    /// PLUCK: one-shot force injection at the excitation point (beta). One
+    /// application of the per-mode force add, then a free linear ring-down with
+    /// the per-partial decay.
     pub fn excite(&mut self, force: f32) {
-        self.excite_tilt(force, 0.0);
+        let f = force as f64;
+        for i in 0..self.n {
+            self.a[i] += self.phi0[i] * self.x3[i] * f;
+            self.adot[i] += self.phi0[i] * self.y3[i] * f;
+        }
     }
 
-    /// Pluck through a PLECTRUM-COMPLIANCE lowpass: per-mode force weighted by
-    /// 1/(1+(f_k/fc)^2). An ideal force step is infinitely sharp; a real plectrum's
-    /// finite width/compliance rolls the excitation off (~4 kHz on a harpsichord).
+    /// Pluck through a FINGER-COMPLIANCE lowpass: per-mode force weighted by
+    /// 1/(1+(f_k/fc)^2). An ideal release is a sharp corner in the string's shape;
+    /// a fingertip is a centimetre of soft contact, so the corner is rounded and
+    /// the partials above the curvature's own wavelength fall away.
     pub fn excite_lp(&mut self, force: f32, fc_hz: f32, f0: f32) {
         let f = force as f64;
         let fc = fc_hz.max(200.0) as f64;
@@ -215,20 +221,6 @@ impl ModalString {
         for i in 0..self.n {
             let fk = f0d * (i + 1) as f64;
             let w = 1.0 / (1.0 + (fk / fc) * (fk / fc));
-            self.a[i] += self.phi0[i] * self.x3[i] * f * w;
-            self.adot[i] += self.phi0[i] * self.y3[i] * f * w;
-        }
-    }
-
-    /// Pluck with a BRIGHTNESS tilt: per-mode force weighted by k^tilt. A plain
-    /// impulse gives mode energy ~1/k^2 (dark); a harpsichord plectrum snap is far
-    /// brighter -- tilt ~1 makes the bridge spectrum ~flat (FluidR3 fit: centroid
-    /// ~4 kHz at EVERY pitch, even f0=73 Hz).
-    pub fn excite_tilt(&mut self, force: f32, tilt: f32) {
-        let f = force as f64;
-        let t = tilt as f64;
-        for i in 0..self.n {
-            let w = ((i + 1) as f64).powf(t);
             self.a[i] += self.phi0[i] * self.x3[i] * f * w;
             self.adot[i] += self.phi0[i] * self.y3[i] * f * w;
         }
@@ -410,7 +402,7 @@ impl ModalString {
 
         // --- apply the bow force to every mode, read out the bridge force ---
         // On bow-off (release_damp < 1) add extra per-sample decay so a detache note
-        // settles in ~150 ms instead of ringing ~500 ms like a plucked harp/harpsichord.
+        // settles in ~150 ms instead of ringing ~500 ms like a freely plucked string.
         let rd = self.release_damp as f64;
         let mut bridge = 0.0f64;
         let n = self.n;

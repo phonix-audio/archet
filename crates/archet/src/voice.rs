@@ -505,8 +505,9 @@ impl ArchetVoice {
         self.freq_target = self.freq_hz; // no glide on a fresh attack
         self.modal_pitch_gain = Self::modal_pgain(self.freq_hz) * Self::inst_level(self.inst_idx);
 
-        // PLUCKED articulation (harpsichord): plectrum excitation then a free modal
-        // ring-down -- the bow machinery is bypassed entirely (see process()).
+        // PLUCKED articulation (pizzicato): a fingertip excitation then a free
+        // modal ring-down -- the bow machinery is bypassed entirely (see
+        // process()).
         if patch.pluck {
             // PUBLISHED-MODEL pluck (Välimäki/Penttinen EURASIP 2004, complete
             // architecture -- no fragments):

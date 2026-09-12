@@ -63,18 +63,6 @@ impl SympStrings {
         }
     }
 
-    /// Harpsichord SOUNDBOARD HALO (Välimäki EURASIP 2004 §3.4): the string stubs
-    /// behind the bridge + undamped strings ring at INHARMONIC frequencies in
-    /// 350-1000 Hz with T60 ~4.5 s -- the instrument's characteristic "reverberant
-    /// feel", which a dry string + body EQ cannot produce.
-    pub fn new_stubs(sr: f32) -> Self {
-        let stubs: &[f32] = &[383.0, 472.0, 557.0, 641.0, 758.0, 866.0, 947.0];
-        Self {
-            combs: stubs.iter().map(|&f| Comb::new(sr, f, 4.5)).collect(),
-            energy: 0.0,
-        }
-    }
-
     /// Feed the dry engine sum; returns the WET halo only (mix it in at ~-20 dB).
     #[inline]
     pub fn process(&mut self, x: f32) -> f32 {
