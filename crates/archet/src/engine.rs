@@ -762,6 +762,63 @@ mod profile {
         println!("wrote /tmp/archet_pizz_melody.wav");
     }
 
+    /// Whether the release control actually shortens a bowed note.
+    ///
+    /// One pitch bowed and then let go, at several values of the control,
+    /// reporting how long the tail takes to fall from the level it held when
+    /// the bow left. A moved audio pin only proves the path changed; this shows
+    /// whether the control spans anything a player would hear. The modal
+    /// release factor is gated on the gesture having fallen away first, so the
+    /// tail can be governed by that ramp rather than by the control, and this
+    /// is what would show it.
+    ///   cargo test --lib engine::profile::bow_release -- --ignored --nocapture
+    #[test]
+    #[ignore = "diagnostic — run with --ignored"]
+    fn bow_release() {
+        let sr = 48_000.0_f32;
+        let block = 512usize;
+        println!("  release    -20 dB     -40 dB");
+        for secs in [0.02f32, 0.08, 0.25, 0.60] {
+            let (mut eng, tx, _mr) = ArchetEngine::new_for_plugin(sr);
+            let mut p = ArchetPatch::violin();
+            p.polyphony = 1;
+            p.release = secs;
+            tx.send(ArchetCommand::LoadPatch(Box::new(p))).unwrap();
+            tx.send(ArchetCommand::NoteOn(69, 100)).unwrap();
+            let mut out: Vec<f32> = Vec::new();
+            let mut buf = vec![0.0f32; block * 2];
+            for _ in 0..((0.8 * sr) as usize / block) {
+                buf.fill(0.0);
+                eng.process_audio(&mut buf, 2);
+                for i in 0..block {
+                    out.push(buf[i * 2]);
+                }
+            }
+            let off = out.len();
+            tx.send(ArchetCommand::NoteOff(69)).unwrap();
+            for _ in 0..((2.0 * sr) as usize / block) {
+                buf.fill(0.0);
+                eng.process_audio(&mut buf, 2);
+                for i in 0..block {
+                    out.push(buf[i * 2]);
+                }
+            }
+            let hop = (0.005 * sr) as usize;
+            let env: Vec<f32> = out[off..]
+                .chunks(hop)
+                .map(|c| (c.iter().map(|x| x * x).sum::<f32>() / c.len() as f32).sqrt())
+                .collect();
+            let r = env.first().copied().unwrap_or(0.0).max(1e-12);
+            let at = |db: f32| -> f32 {
+                env.iter()
+                    .position(|&e| 20.0 * (e / r).log10() <= db)
+                    .map(|i| i as f32 * 0.005)
+                    .unwrap_or(f32::NAN)
+            };
+            println!("  {secs:7.2}  {:7.3} s  {:7.3} s", at(-20.0), at(-40.0));
+        }
+    }
+
     /// Acoustic-fit harness: render the violin patch at G3/D4/A4/D5/A5 ->
     /// /tmp/archet_<pitch>.wav, so the harmonic envelope can be measured and
     /// the body/string tuning driven OBJECTIVELY (no listening).
