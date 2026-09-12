@@ -277,6 +277,11 @@ mod tests {
             let n = ((ms / 1000.0 * fs) as usize).min(h.len());
             println!("  energy in the first {ms:>5.0} ms: {:>5.1} %", 100.0 * sq(&h[..n]) / total);
         }
+        // The response itself, as raw little-endian f32, so the loss a string
+        // sees through this body can be read off it at any partial.
+        let bytes: Vec<u8> = h.iter().flat_map(|x| x.to_le_bytes()).collect();
+        std::fs::write("/tmp/archet_body_ir.f32", bytes).expect("write the impulse response");
+        println!("  wrote /tmp/archet_body_ir.f32 ({} samples at {fs} Hz)", h.len());
     }
 }
 

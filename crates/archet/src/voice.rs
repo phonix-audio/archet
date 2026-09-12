@@ -340,6 +340,61 @@ impl ArchetVoice {
     /// a stopped note follows. Tunings are the standard ones; lengths are
     /// Fletcher and Rossing, The Physics of Musical Instruments, Springer 1991,
     /// table 10.1 (after Hutchins 1980), at the middle of each range.
+    /// Measured decay of the violin's open strings, plucked: the University of
+    /// Iowa Electronic Music Studios instrument samples, anechoic, mf, one
+    /// exponential fitted per partial between three and thirty dB down, kept
+    /// only where the fit is clean and the band holds no partial of another
+    /// open string (the fifths coincide: three G is two D, three D two A,
+    /// three A two E). Pairs of (hertz, seconds to sixty dB down) per string.
+    /// They carry what no smooth law does: the fundamental rings longest,
+    /// neighbouring partials differ several-fold, and the upper partials of
+    /// the A and E are gone within a third of a second. A stopped note on the
+    /// string reads the same curve at its own partial frequencies. Only the
+    /// violin is measured; the other instruments keep the fitted law.
+    fn measured_pizz_t60(body_index: usize, string: usize) -> Option<&'static [(f32, f32)]> {
+        if body_index != 0 {
+            return None;
+        }
+        const G: &[(f32, f32)] = &[
+            (194.7, 5.51), (388.0, 2.15), (780.1, 2.00), (975.4, 2.39),
+            (1171.2, 0.98), (1363.0, 1.41), (1558.2, 1.49),
+        ];
+        const D: &[(f32, f32)] = &[(291.0, 3.86), (581.4, 2.47), (871.4, 1.29), (1163.7, 1.58)];
+        const A: &[(f32, f32)] = &[(440.2, 3.31), (1755.5, 0.22), (2641.0, 0.27)];
+        const E: &[(f32, f32)] = &[
+            (657.7, 2.63), (1316.6, 1.02), (1969.2, 0.96), (2633.1, 0.70),
+            (3291.3, 1.22), (3947.5, 0.26),
+        ];
+        Some(match string {
+            0 => G,
+            1 => D,
+            2 => A,
+            _ => E,
+        })
+    }
+
+    /// Decay time at a frequency, from a measured table: straight in log
+    /// frequency against log time between the points, held at the end values
+    /// beyond them.
+    fn t60_from_table(table: &[(f32, f32)], hz: f32) -> f32 {
+        let (f_lo, t_lo) = table[0];
+        let (f_hi, t_hi) = table[table.len() - 1];
+        if hz <= f_lo {
+            return t_lo;
+        }
+        if hz >= f_hi {
+            return t_hi;
+        }
+        for w in table.windows(2) {
+            let ((f1, t1), (f2, t2)) = (w[0], w[1]);
+            if hz >= f1 && hz <= f2 {
+                let x = (hz / f1).ln() / (f2 / f1).ln();
+                return (t1.ln() + x * (t2.ln() - t1.ln())).exp();
+            }
+        }
+        t_hi
+    }
+
     pub(crate) fn string_for(body_index: usize, note: u8) -> (usize, f32, f32) {
         let (opens, length_m): (&[u8; 4], f32) = match body_index {
             0 => (&[55, 62, 69, 76], 0.327), // violin: G3 D4 A4 E5
@@ -638,10 +693,16 @@ impl ArchetVoice {
             // but its internal losses and rings like a harp.
             const LAMBDA: f32 = 39.0;
             const MU: f32 = 4.0e5;
+            // The measured curve of the string this note is on, where one
+            // exists; the fitted law otherwise.
+            let measured = Self::measured_pizz_t60(self.inst_idx, string);
             let t60law = move |k: usize| -> f32 {
                 let kf = k as f32;
                 let sk = stiff * kf * kf;
                 let wn = std::f32::consts::TAU * f0 * kf * (1.0 + sk).sqrt();
+                if let Some(table) = measured {
+                    return Self::t60_from_table(table, wn / std::f32::consts::TAU);
+                }
                 let eta = (eta_f + eta_a / wn + sk * ETA_B) / (1.0 + sk);
                 let wl = wn * LAMBDA;
                 let body = 2.0 * f0 * (wn * wn * LAMBDA / (MU * MU + wl * wl));
