@@ -599,7 +599,27 @@ impl ArchetVoice {
             // than a force. The lowpass is the fingertip's own compliance,
             // rounding the corner of the triangle.
             let h = 5200.0f32 * (0.35 + 0.65 * self.vel);
-            let plp = (2600.0 - self.freq_hz * 0.8).clamp(1200.0, 2600.0);
+            // The fingertip covers a span of the string, not a point, and that
+            // span low-passes the initial shape at a corner of the wave speed
+            // over twice the span (Chadefaux, Le Carrou and Fabre, JASA 2012,
+            // eq. 10), the width of a finger in contact with a string being
+            // measured there at about two centimetres. The wave speed is twice
+            // the length times the fundamental, so the corner sits at a FIXED
+            // HARMONIC RANK -- length over width -- whatever the note, and the
+            // rank differs between instruments because one finger spans less of
+            // a longer string. The law this replaces lowered the corner in
+            // frequency as the pitch rose, which left a top string with almost
+            // nothing above its third harmonic. Sounding lengths from Fletcher
+            // and Rossing, The Physics of Musical Instruments, Springer 1991,
+            // table 10.1 (after Hutchins 1980), at the middle of each range.
+            const FINGER_M: f32 = 0.020;
+            let length_m = match self.inst_idx {
+                0 => 0.327, // violin
+                1 => 0.375, // viola
+                2 => 0.685, // cello
+                _ => 1.105, // double bass
+            };
+            let plp = self.freq_hz * (length_m / FINGER_M);
             // 116, where the force path used 0.6. A release is not quieter by
             // mistake: the bridge force sums the modes weighted by k, so the
             // old impulse drew most of its loudness from upper partials it had
