@@ -11,6 +11,14 @@ use super::patch::{ArchetParam, ArchetPatch};
 use super::sympathetic::SympStrings;
 use super::voice::{ArchetVoice, MAX_VOICES};
 
+/// Physical voices a unison ever lights, whatever section size is asked for:
+/// the perceptual-saturation pool (Ternstroem), enough independent
+/// instantaneous pitches to fill the scatter band. Larger sections are
+/// realised by the O(1) section diffuser instead, so the cost stays flat.
+/// Both `fire_unison` and the voice-sum norm need it: one to spend the
+/// voices, the other to divide by what a note actually lights.
+const PHYS_CAP: usize = 8;
+
 #[derive(Debug, Clone)]
 pub enum ArchetCommand {
     NoteOn(u8, u8),
@@ -145,7 +153,27 @@ impl ArchetEngine {
             return;
         }
 
-        let norm = (1.0 / (poly as f32).sqrt()) * self.patch.output_level;
+        // Two terms, and neither is the polyphony setting. That setting is how
+        // much overlap the player is ALLOWED, so keying the norm to it made the
+        // instrument quieter for raising a limit, and cut a desk for voices it
+        // could never light.
+        //
+        // The first term is a fixed headroom for the notes a player sounds at
+        // once. It cannot follow the live count, which would make a desk pump
+        // as notes enter and leave, and it cannot be dropped: without it two
+        // notes already reach full scale. A chord of this many notes is what
+        // the instrument is voiced to hold.
+        //
+        // The second is physical: one note of a section lights that many
+        // voices, they sum incoherently, and dividing by the root of their
+        // number puts a section note back beside a solo one.
+        const CHORD: f32 = 8.0;
+        let lit = if self.patch.ensemble >= 1.5 {
+            (self.patch.ensemble.max(2.0).round() as usize).clamp(2, PHYS_CAP)
+        } else {
+            1
+        };
+        let norm = (1.0 / (CHORD * lit as f32).sqrt()) * self.patch.output_level;
         // diffuser fill = how far the requested section exceeds the real
         // voice pool (8 -> 0, ~40+ -> 1, saturating). O(1) regardless of size.
         let fill = if self.patch.ensemble > 8.0 {
@@ -403,7 +431,6 @@ impl ArchetEngine {
         // scatter band. Requested sizes ABOVE the cap are realized by the
         // O(1) section diffuser (engine output) -- cost stays flat, so a
         // 100-violin setting is feasible.
-        const PHYS_CAP: usize = 8; // perceptual-saturation pool; size > 8 = chorus fill
         let size = self.patch.ensemble.max(2.0);
         let count: usize = (size.round() as usize).clamp(2, PHYS_CAP);
         // measured inter-player F0 dispersion of a real section is 20-30 cents
@@ -522,7 +549,7 @@ mod preset_sweep_tests {
             eng.process_audio(&mut buf, 2);
             for &s in &buf { h = h.rotate_left(7) ^ s.to_bits() as u64; }
         }
-        const GOLDEN: u64 = 0xed19e8bb146dbb93; // the ensemble render, note-offs included
+        const GOLDEN: u64 = 0xd5339c2c3efaae5c; // the ensemble render, note-offs included
         assert_eq!(h, GOLDEN, "Archet ensemble render drifted from golden (hash {h:#018x})");
     }
 }
@@ -882,6 +909,91 @@ mod profile {
             write_wav(&format!("/tmp/archet_bowphrase_{:.0}ms.wav", secs * 1000.0), &out, sr);
         }
         println!("wrote /tmp/archet_bowphrase_*.wav");
+    }
+
+    /// The balance of the bank: one note, every factory preset.
+    ///
+    /// The voice-sum norm decides how a solo patch sits against a desk, and
+    /// nothing else here measures that: the chord probe is solo, the register
+    /// sweep is wired to one preset, and the ensemble pin reports no level. A
+    /// desk note lights several voices that sum incoherently, so the norm has
+    /// to divide them back down to where a solo note sits; whether it does is
+    /// a measurement, not an argument.
+    ///
+    /// Peak and a settled RMS are both printed because the bank mixes
+    /// articulations: a plucked preset decays through the window a bowed one
+    /// sustains, so neither number alone compares them.
+    ///   cargo test --lib engine::profile::preset_levels -- --ignored --nocapture
+    #[test]
+    #[ignore = "diagnostic — run with --ignored"]
+    fn preset_levels() {
+        let sr = 48_000.0_f32;
+        let block = 512usize;
+        println!("  {:<22} {:>5} {:>5} {:>8} {:>10}", "preset", "poly", "ens", "peak", "rms 0.3-1s");
+        for preset in crate::patch::ArchetPatch::factory_presets() {
+            let (mut eng, tx, _mr) = ArchetEngine::new_for_plugin(sr);
+            let (name, poly, ens) = (preset.name.clone(), preset.polyphony, preset.ensemble);
+            tx.send(ArchetCommand::LoadPatch(Box::new(preset))).unwrap();
+            tx.send(ArchetCommand::NoteOn(69, 100)).unwrap();
+            let mut out: Vec<f32> = Vec::new();
+            let mut buf = vec![0.0f32; block * 2];
+            for _ in 0..((1.0 * sr) as usize / block) {
+                buf.fill(0.0);
+                eng.process_audio(&mut buf, 2);
+                for i in 0..block {
+                    out.push(buf[i * 2]);
+                }
+            }
+            let peak = out.iter().fold(0.0f32, |m, x| m.max(x.abs()));
+            let a = (0.3 * sr) as usize;
+            let w = &out[a.min(out.len())..];
+            let rms = if w.is_empty() {
+                0.0
+            } else {
+                (w.iter().map(|x| x * x).sum::<f32>() / w.len() as f32).sqrt()
+            };
+            println!("  {name:<22} {poly:>5} {ens:>5.1} {peak:>8.4} {rms:>10.5}");
+        }
+    }
+
+    /// Headroom on a dense chord, which is where a solo patch has no guard.
+    ///
+    /// The voice-sum norm divides by the voices one NOTE lights, so a solo
+    /// patch is not divided at all and overlapping notes sum freely, as the
+    /// strings of a real instrument do. Nothing else here measures that: the
+    /// register sweep builds a fresh engine per pitch, so its notes can never
+    /// overlap, and the phrases play well under full velocity. A chord held at
+    /// full velocity, filling the voice pool, is the worst a player can ask for.
+    ///   cargo test --lib engine::profile::chord_headroom -- --ignored --nocapture
+    #[test]
+    #[ignore = "diagnostic — run with --ignored"]
+    fn chord_headroom() {
+        let sr = 48_000.0_f32;
+        let block = 512usize;
+        println!("  voices     peak   at full scale   headroom");
+        for n in [1usize, 2, 4, 6, 8] {
+            let (mut eng, tx, _mr) = ArchetEngine::new_for_plugin(sr);
+            let p = ArchetPatch::violin(); // solo: the norm divides by one
+            tx.send(ArchetCommand::LoadPatch(Box::new(p))).unwrap();
+            // A spread chord, every note at full velocity, filling the pool.
+            for (k, pitch) in [55u8, 62, 67, 71, 74, 79, 83, 86].iter().take(n).enumerate() {
+                let _ = k;
+                tx.send(ArchetCommand::NoteOn(*pitch, 127)).unwrap();
+            }
+            let mut out: Vec<f32> = Vec::new();
+            let mut buf = vec![0.0f32; block * 2];
+            for _ in 0..((1.5 * sr) as usize / block) {
+                buf.fill(0.0);
+                eng.process_audio(&mut buf, 2);
+                for i in 0..block {
+                    out.push(buf[i * 2]);
+                }
+            }
+            let peak = out.iter().fold(0.0f32, |m, x| m.max(x.abs()));
+            let full = out.iter().filter(|x| x.abs() >= 0.999).count();
+            let head = 20.0 * (1.0 / peak.max(1e-12)).log10();
+            println!("  {n:>6}   {peak:6.4}   {full:>13}   {head:+6.1} dB");
+        }
     }
 
     /// Acoustic-fit harness: render the violin patch at G3/D4/A4/D5/A5 ->
@@ -1459,6 +1571,6 @@ mod golden_audio {
             }
         }
         eprintln!("GOLDEN = {h:#018x}");
-        assert_eq!(h, 0x8b57_453b_40a4_2a38, "the engine's rendered audio changed");
+        assert_eq!(h, 0xf912_c795_20b0_0174, "the engine's rendered audio changed");
     }
 }
