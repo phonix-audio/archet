@@ -244,22 +244,7 @@ impl ModalString {
         }
     }
 
-    /// Pluck through a FINGER-COMPLIANCE lowpass: per-mode force weighted by
-    /// 1/(1+(f_k/fc)^2). An ideal release is a sharp corner in the string's shape;
-    /// a fingertip is a centimetre of soft contact, so the corner is rounded and
-    /// the partials above the curvature's own wavelength fall away.
-    pub fn excite_lp(&mut self, force: f32, fc_hz: f32, f0: f32) {
-        let f = force as f64;
-        let fc = fc_hz.max(200.0) as f64;
-        let f0d = f0 as f64;
-        for i in 0..self.n {
-            let fk = f0d * (i + 1) as f64;
-            let w = 1.0 / (1.0 + (fk / fc) * (fk / fc));
-            self.a[i] += self.phi0[i] * self.x3[i] * f * w;
-            self.adot[i] += self.phi0[i] * self.y3[i] * f * w;
-        }
-    }
-
+    
     /// Partially damp the existing modal energy (for legato retune): the old pitch's
     /// modal phases don't form the NEW pitch's Helmholtz corner, so they beat ("weird"
     /// slur) until the bow re-locks. Knocking the stale energy down lets the (still
