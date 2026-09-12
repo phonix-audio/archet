@@ -210,6 +210,40 @@ impl ModalString {
         }
     }
 
+    /// PLUCK as a RELEASE, which is what a pluck is: the string is pulled into
+    /// a triangular shape at `beta` and let go. Every mode therefore starts at
+    /// its own DISPLACEMENT and at ZERO velocity. Expanding that triangle on
+    /// the mode basis gives a_n proportional to sin(n pi beta) / n^2, with
+    /// a_n-dot zero, and `phi0` already carries the sin(n pi beta) for this
+    /// beta, so the
+    /// remaining constant folds into `amp`, calibrated by the caller.
+    ///
+    /// The 1/n^2 is precisely what injecting a FORCE does not give. Measured
+    /// against the release, a force impulse leaves the partials some 34 dB too
+    /// loud by the sixteenth (and the gap keeps widening), and starts the
+    /// fundamental with a modal velocity ~52x the one its own displacement
+    /// implies: the string is struck rather than let go.
+    ///
+    /// `fc_hz` is the fingertip's compliance, rounding the corner of the shape.
+    pub fn release(&mut self, amp: f32, fc_hz: f32, f0: f32) {
+        let fc = fc_hz.max(200.0) as f64;
+        let f0d = f0 as f64;
+        // `amp` arrives on the scale a FORCE used, because that is what the
+        // caller's velocity mapping is voiced in. A force reached the modal
+        // displacement through `x3`, a displacement does not, so carry that
+        // factor here. Take it from `x3[0]` rather than from any formula: it is
+        // the integrator's own coefficient, right at every pitch. Once, on the
+        // fundamental -- applying it per mode would bend the shape to 1/k^4.
+        let a0 = amp as f64 * self.x3[0];
+        for i in 0..self.n {
+            let k = (i + 1) as f64;
+            let fk = f0d * k;
+            let w = 1.0 / (1.0 + (fk / fc) * (fk / fc));
+            self.a[i] = a0 * self.phi0[i] * w / (k * k);
+            self.adot[i] = 0.0;
+        }
+    }
+
     /// Pluck through a FINGER-COMPLIANCE lowpass: per-mode force weighted by
     /// 1/(1+(f_k/fc)^2). An ideal release is a sharp corner in the string's shape;
     /// a fingertip is a centimetre of soft contact, so the corner is rounded and

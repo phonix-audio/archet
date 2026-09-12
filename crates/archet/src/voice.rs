@@ -536,14 +536,22 @@ impl ArchetVoice {
             self.modal.noise_amt = 0.0;
             self.modal.set_voice_t60(self.freq_hz, stiff, p, &t60law);
             self.modal.reset();
-            // (d) a finger, not a plectrum. A quill releases the string from a
-            // point and its excitation is a step; a fingertip is a centimetre
-            // of soft contact, so the corner is rounded and the spectrum falls
-            // away far sooner. And unlike a jack, a finger plucks harder or
-            // softer: the force follows the velocity.
-            let f = 5200.0f32 * (0.35 + 0.65 * self.vel);
+            // (d) the pluck is a RELEASE, not a blow. The finger pulls the
+            // string aside and lets go, so the modes start at a displacement
+            // that falls as 1/n^2 and at zero velocity. Harder plucking pulls
+            // the string FURTHER, so the velocity sets the displacement rather
+            // than a force. The lowpass is the fingertip's own compliance,
+            // rounding the corner of the triangle.
+            let h = 5200.0f32 * (0.35 + 0.65 * self.vel);
             let plp = (2600.0 - self.freq_hz * 0.8).clamp(1200.0, 2600.0);
-            self.modal.excite_lp(f * 0.6 * (1.0 + self.hum.next() * 0.05), plp, self.freq_hz);
+            // 116, where the force path used 0.6. A release is not quieter by
+            // mistake: the bridge force sums the modes weighted by k, so the
+            // old impulse drew most of its loudness from upper partials it had
+            // no business exciting, and matching the fundamental alone costs
+            // ~24 dB. This gain is a voicing constant, measured rather than
+            // derived: it puts the note back at the peak the bank was voiced
+            // against (0.0565 on the repeat profile at D4, velocity 100).
+            self.modal.release(h * 116.0 * (1.0 + self.hum.next() * 0.05), plp, self.freq_hz);
             // (e) the release: the string leaving the fingertip makes a brief
             // scrape, an order quieter and shorter than a quill's, fed into the
             // string so it is pitch-correlated rather than added noise.
@@ -555,7 +563,7 @@ impl ArchetVoice {
                 let t = i as f32 / self.sr;
                 let w = self.noise.next();
                 lp += (w - lp) * 0.12;
-                self.exc_buf.push(lp * (-(t / 0.004)).exp() * f * 0.004);
+                self.exc_buf.push(lp * (-(t / 0.004)).exp() * h * 0.004);
             }
             self.exc_pos = 0;
             self.bow_force = 0.0;
