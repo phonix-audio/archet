@@ -816,7 +816,72 @@ mod profile {
                     .unwrap_or(f32::NAN)
             };
             println!("  {secs:7.2}  {:7.3} s  {:7.3} s", at(-20.0), at(-40.0));
+            write_wav(&format!("/tmp/archet_release_{:.0}ms.wav", secs * 1000.0), &out, sr);
         }
+        println!("wrote /tmp/archet_release_*.wav");
+    }
+
+    /// A bowed phrase, to hear whether a long release blurs the line.
+    ///
+    /// The control now governs how the bow leaves, and the presets were voiced
+    /// when that fall was fixed and short, so the longest of them now holds a
+    /// note several times longer than it used to. Notes that overlap because
+    /// the previous one has not let go is the thing to listen for, and no
+    /// measurement settles it.
+    ///   cargo test --lib engine::profile::bow_phrase -- --ignored --nocapture
+    #[test]
+    #[ignore = "diagnostic — run with --ignored"]
+    fn bow_phrase() {
+        let sr = 48_000.0_f32;
+        let block = 512usize;
+        let beat = 60.0 / 108.0;
+        // pitch, velocity, written length in beats
+        let phrase: &[(u8, u8, f32)] = &[
+            (69, 96, 0.5), (71, 92, 0.5), (72, 100, 1.0), (74, 96, 0.5),
+            (76, 108, 1.5), (74, 92, 0.5), (72, 96, 0.5), (69, 100, 1.5),
+            (62, 100, 0.5), (66, 96, 0.5), (69, 104, 1.0), (67, 96, 0.5),
+            (64, 100, 0.5), (62, 104, 2.0),
+        ];
+        for secs in [0.06f32, 0.25] {
+            let (mut eng, tx, _mr) = ArchetEngine::new_for_plugin(sr);
+            let mut p = ArchetPatch::violin();
+            p.polyphony = 8;
+            p.release = secs;
+            tx.send(ArchetCommand::LoadPatch(Box::new(p))).unwrap();
+            let written: f32 = phrase.iter().map(|n| n.2).sum::<f32>() * beat;
+            let mut out: Vec<f32> = Vec::new();
+            let mut buf = vec![0.0f32; block * 2];
+            let mut pending: Vec<(f32, u8)> = Vec::new();
+            let mut next = 0usize;
+            let mut onset = 0.0f32;
+            let mut t = 0.0f32;
+            while t < written + 2.0 {
+                while next < phrase.len() && onset <= t {
+                    let (pitch, vel, len) = phrase[next];
+                    tx.send(ArchetCommand::NoteOn(pitch, vel)).unwrap();
+                    pending.push((onset + len * beat, pitch));
+                    onset += len * beat;
+                    next += 1;
+                }
+                pending.retain(|&(when, pitch)| {
+                    if when > t {
+                        return true;
+                    }
+                    tx.send(ArchetCommand::NoteOff(pitch)).unwrap();
+                    false
+                });
+                buf.fill(0.0);
+                eng.process_audio(&mut buf, 2);
+                for i in 0..block {
+                    out.push(buf[i * 2]);
+                }
+                t += block as f32 / sr;
+            }
+            let peak = out.iter().fold(0.0f32, |m, x| m.max(x.abs()));
+            println!("  release {secs:.2} s: {:.1} s, peak {peak:.4}", out.len() as f32 / sr);
+            write_wav(&format!("/tmp/archet_bowphrase_{:.0}ms.wav", secs * 1000.0), &out, sr);
+        }
+        println!("wrote /tmp/archet_bowphrase_*.wav");
     }
 
     /// Acoustic-fit harness: render the violin patch at G3/D4/A4/D5/A5 ->
