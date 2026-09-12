@@ -584,7 +584,7 @@ mod tests {
 
     /// De-risk: SWEEP bow force (relative to the numerical impedance) to find the
     /// clean-Helmholtz window. The bug was bow force >> too small to ever STICK.
-    ///   cargo test --release --lib archet::modal::tests::derisk -- --ignored --nocapture
+    ///   cargo test --release --lib modal::tests::derisk -- --ignored --nocapture
     #[test]
     #[ignore]
     fn derisk() {

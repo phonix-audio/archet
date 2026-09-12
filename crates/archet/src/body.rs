@@ -215,7 +215,7 @@ mod tests {
     /// suppressed ~4-6 dB below A (anti-nasality, his strongest discriminator);
     /// DE(1640-4200) within ~3 dB of A (brilliance / bridge hill);
     /// clarity = DE - F(4200-6879) >= 10 dB (no harshness).
-    ///   cargo test --release --lib archet::body::tests::dunnwald -- --ignored --nocapture
+    ///   cargo test --release --lib body::tests::dunnwald -- --ignored --nocapture
     #[test]
     #[ignore = "diagnostic"]
     fn dunnwald() {
