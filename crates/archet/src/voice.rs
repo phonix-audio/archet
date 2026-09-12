@@ -111,6 +111,7 @@ pub struct ArchetVoice {
     on_string: Option<(usize, usize)>,
     stopped: bool,
     stop_damp: f32, // per-sample modal decay once a finger lands on the string
+    hand_damp: f32, // per-sample modal decay once the key is up and the hand mutes
 
     pub note: Option<u8>,
     /// Monotonic note-on sequence number (set by the engine): note_off releases only
@@ -238,6 +239,7 @@ impl ArchetVoice {
             // finger is not measured anywhere; this is of the order of the
             // onset ceiling Melka measured on pizzicato, and it is a choice.
             stop_damp: (0.1f32).powf(1.0 / (0.004 * sr)),
+            hand_damp: 1.0,
             stroke: 0.3,
             stroke_rise_t: 0.03,
             stroke_fall_t: 0.06,
@@ -849,6 +851,11 @@ impl ArchetVoice {
         // damps nothing.
         let secs = patch.release.clamp(0.01, 1.0);
         self.modal_release_factor = (0.1f32).powf(1.0 / (secs * self.sr));
+        // A plucked string rings by its own losses only while the key is
+        // held: the player who lets a note ring holds it. Once the key is up
+        // the hand mutes the string, and how fast is the same control, in
+        // seconds. Notes released together, a double stop, go together.
+        self.hand_damp = (0.1f32).powf(1.0 / (secs * self.sr));
         self.releasing = true;
         self.note = None;
     }
@@ -938,9 +945,17 @@ impl ArchetVoice {
         // leaves the string and the note decays by its own losses, where a
         // harpsichord drops a damper on key release.
         if patch.pluck {
-            // Nothing damps a plucked note on key release; only a finger
-            // landing on the same string ends it.
-            let damp = if self.stopped { self.stop_damp } else { 1.0 };
+            // While the key is held the string rings by its measured losses.
+            // A finger landing on the same string ends it at once; the hand
+            // muting after the key is up ends it at the release control's
+            // pace.
+            let damp = if self.stopped {
+                self.stop_damp
+            } else if self.releasing {
+                self.hand_damp
+            } else {
+                1.0
+            };
             self.modal.release_damp = damp;
             self.modal_b.release_damp = damp;
             // the finger's release scrape, fed into the string

@@ -182,12 +182,19 @@ impl ArchetEngine {
         // The open strings a plucked note occupies right now cannot ring in
         // sympathy: they are the strings sounding, under a finger or plucked.
         let mut held = [false; 4];
+        let mut key_down = false;
         for v in self.voices[..poly].iter() {
             if let Some((inst, string)) = v.on_string() {
                 if v.is_active() && inst == self.symp_inst && string < 4 {
                     held[string] = true;
                 }
+                key_down |= v.note.is_some();
             }
+        }
+        // With no key down on a plucked patch the hand rests on the strings
+        // and nothing rings in sympathy; a held note or chord keeps its halo.
+        if self.patch.pluck && !key_down {
+            held = [true; 4];
         }
         self.symp.set_held(held);
         for frame_idx in 0..frames {
@@ -273,16 +280,21 @@ impl ArchetEngine {
                     if !self.held_keys.contains(&note) { self.held_keys.push(note); }
                     self.note_seq += 1;
                     let seq = self.note_seq;
-                    // A plucked string carries one note. The finger that stops
-                    // the next one ends whatever still rings on that string,
-                    // whether the new note sounds through a unison or alone.
+                    // A plucked string carries one note: the finger that stops
+                    // the next one ends whatever still rings on that string.
+                    // And the hand that plucks rests on the others, so a note
+                    // whose key is already up, still fading, is ended by the
+                    // next attack too; a note still held rings on, which is
+                    // how a player lets one ring.
                     if self.patch.pluck {
                         let inst = ArchetVoice::inst_for(note, &self.patch);
                         let (string, _, _) = ArchetVoice::string_for(inst, note);
                         let poly = (self.patch.polyphony as usize).min(MAX_VOICES);
                         for v in self.voices[..poly].iter_mut() {
-                            if v.is_active() && v.on_string() == Some((inst, string)) {
-                                v.stop_string();
+                            if let Some((i, s)) = v.on_string() {
+                                if v.is_active() && i == inst && (s == string || v.is_releasing()) {
+                                    v.stop_string();
+                                }
                             }
                         }
                     }
@@ -1153,6 +1165,10 @@ mod profile {
             (&VLC, &VLC_16),
             (&CB, &CB_16),
         ];
+        // A plucked note has nothing to hold: the passage is pizzicato
+        // sempre and detached, so each eighth is written a quarter of a beat
+        // long and the hand mutes it well before the next.
+        const HELD: f32 = 0.25;
         let mut s = Vec::new();
         for (desk, (bars, last)) in desks.iter().enumerate() {
             for bar in 1..=16usize {
@@ -1160,7 +1176,7 @@ mod profile {
                 for (slot, ps) in slots.iter().enumerate() {
                     let on = (bar - 1) as f32 * 2.0 + slot as f32 * 0.5;
                     for &p in ps.iter() {
-                        s.push((desk, on, p, VEL[bar - 1], 0.5));
+                        s.push((desk, on, p, VEL[bar - 1], HELD));
                     }
                 }
             }
@@ -1326,17 +1342,13 @@ mod profile {
         let mut out: Vec<f32> = Vec::new();
         let mut buf = vec![0.0f32; block * 2];
         let mut mix = vec![0.0f32; block];
+        let mut stems: Vec<Vec<f32>> = vec![Vec::new(); desks.len()];
         let mut fired = vec![false; score.len()];
         let mut pending: Vec<(f32, usize, u8)> = Vec::new();
         let mut t = 0.0f32;
         while t < end {
-            for (i, &(desk, on, pitch, vel, len)) in score.iter().enumerate() {
-                if !fired[i] && on * beat <= t {
-                    engines[desk].1.send(ArchetCommand::NoteOn(pitch, vel)).unwrap();
-                    pending.push(((on + len) * beat, desk, pitch));
-                    fired[i] = true;
-                }
-            }
+            // Releases due now go before the attacks due now: a key that
+            // comes up at the same instant another goes down comes up first.
             pending.retain(|&(when, desk, pitch)| {
                 if when > t {
                     return true;
@@ -1344,12 +1356,20 @@ mod profile {
                 engines[desk].1.send(ArchetCommand::NoteOff(pitch)).unwrap();
                 false
             });
+            for (i, &(desk, on, pitch, vel, len)) in score.iter().enumerate() {
+                if !fired[i] && on * beat <= t {
+                    engines[desk].1.send(ArchetCommand::NoteOn(pitch, vel)).unwrap();
+                    pending.push(((on + len) * beat, desk, pitch));
+                    fired[i] = true;
+                }
+            }
             mix.iter_mut().for_each(|m| *m = 0.0);
-            for (eng, _, _) in engines.iter_mut() {
+            for (d, (eng, _, _)) in engines.iter_mut().enumerate() {
                 buf.fill(0.0);
                 eng.process_audio(&mut buf, 2);
                 for i in 0..block {
                     mix[i] += buf[i * 2];
+                    stems[d].push(buf[i * 2]);
                 }
             }
             out.extend_from_slice(&mix);
@@ -1364,7 +1384,12 @@ mod profile {
             out.len() as f32 / sr
         );
         write_wav("/tmp/archet_pizz_score.wav", &out, sr);
-        println!("wrote /tmp/archet_pizz_score.wav");
+        // Each desk on its own as well, so a fault heard in the sum can be
+        // laid at one instrument's door.
+        for (d, stem) in stems.iter().enumerate() {
+            write_wav(&format!("/tmp/archet_pizz_score_desk{d}.wav"), stem, sr);
+        }
+        println!("wrote /tmp/archet_pizz_score.wav and /tmp/archet_pizz_score_desk{{0..4}}.wav");
     }
 
     /// Acoustic-fit harness: render the violin patch at G3/D4/A4/D5/A5 ->
@@ -1861,12 +1886,13 @@ mod audit_tests {
 mod golden_audio {
     use super::*;
 
-    /// A pizzicato rings on after the finger leaves the string. It was a
-    /// harpsichord before: a damper fell on key release and stopped the tone
-    /// in forty milliseconds, which is what a keyboard does and what a
-    /// violinist does not.
+    /// A pizzicato rings by the string's own losses for as long as the key is
+    /// held, and the hand mutes it once the key is up, at the release
+    /// control's pace. The player who lets a note ring holds it; the player
+    /// in a fast passage does not, and the strings would pile up into mud if
+    /// nothing but the string's own losses ended them.
     #[test]
-    fn a_pizzicato_rings_on_after_the_key_is_released() {
+    fn a_pizzicato_rings_while_held_and_the_hand_mutes_it_after() {
         let sr = 48_000.0f32;
         let bank = super::super::patch::ArchetPatch::factory_presets();
         let preset = bank
@@ -1892,16 +1918,23 @@ mod golden_audio {
             (acc / n as f64).sqrt() as f32
         };
         let struck = level(&mut eng, &mut buf, 20);
+        // Held for another quarter second: the string rings on by itself.
+        let held = level(&mut eng, &mut buf, 24);
         let _ = tx.send(ArchetCommand::NoteOff(50));
-        // A quarter second after the finger leaves, and again half a second on.
-        let just_after = level(&mut eng, &mut buf, 24);
-        let later = level(&mut eng, &mut buf, 48);
+        // The hand mutes at the release control's pace, so the fade itself
+        // is skipped and the level read a fifth of a second on, where the
+        // note must be long gone.
+        let _ = level(&mut eng, &mut buf, 19);
+        let muted = level(&mut eng, &mut buf, 12);
         assert!(struck > 1e-4, "the pizzicato never spoke: {struck}");
         assert!(
-            just_after > struck * 0.15,
-            "the note stopped with the key: {just_after} against {struck} while held"
+            held > struck * 0.3,
+            "the note died while the key was held: {held} against {struck}"
         );
-        assert!(later < struck, "the note did not decay at all: {later} against {struck}");
+        assert!(
+            muted < held * 0.05,
+            "the hand did not mute the note after the key came up: {muted} against {held} held"
+        );
     }
 
     #[test]
@@ -1942,6 +1975,6 @@ mod golden_audio {
             }
         }
         eprintln!("GOLDEN = {h:#018x}");
-        assert_eq!(h, 0x5522_826d_aa53_0b3f, "the engine's rendered audio changed");
+        assert_eq!(h, 0x06a6_395d_4606_cf8f, "the engine's rendered audio changed");
     }
 }
