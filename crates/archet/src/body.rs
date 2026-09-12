@@ -252,6 +252,31 @@ mod tests {
         println!("  anti-nasality A-B = {:+.1} dB (want +4..+6)", a - b);
         println!("  brilliance  DE-A = {:+.1} dB (want > -3)", de - a);
         println!("  clarity     DE-F = {:+.1} dB (want >= +10)", de - f_);
+        // The band integrals say nothing about TIME: a bank at Q 35 and one at
+        // Q 500 can share them exactly. What decides whether the body knocks
+        // like wood or drones is how fast its own impulse response dies, and
+        // how much of its energy lands in the first few milliseconds. Measured
+        // on the envelope, with no filter in the path: a band-limited decay
+        // read through a brick wall measures the wall.
+        let hop = (0.001 * fs) as usize;
+        let env: Vec<f32> = h
+            .chunks(hop)
+            .map(|c| (c.iter().map(|x| x * x).sum::<f32>() / c.len() as f32).sqrt())
+            .collect();
+        let epk = env.iter().cloned().fold(0.0f32, f32::max).max(1e-12);
+        let at = |db: f32| -> f32 {
+            env.iter()
+                .position(|&e| 20.0 * (e / epk).log10() <= db)
+                .map(|i| i as f32)
+                .unwrap_or(f32::NAN)
+        };
+        println!("  ring: -20 dB at {:.0} ms, -40 dB at {:.0} ms", at(-20.0), at(-40.0));
+        let sq = |s: &[f32]| -> f64 { s.iter().map(|x| (*x as f64) * (*x as f64)).sum() };
+        let total = sq(&h).max(1e-30);
+        for ms in [2.0f32, 10.0, 50.0, 200.0] {
+            let n = ((ms / 1000.0 * fs) as usize).min(h.len());
+            println!("  energy in the first {ms:>5.0} ms: {:>5.1} %", 100.0 * sq(&h[..n]) / total);
+        }
     }
 }
 
