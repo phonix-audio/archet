@@ -66,6 +66,9 @@ impl Pink {
 pub struct ArchetVoice {
     string: BowedWaveguide,
     modal: ModalString,   // Demoucron modal string (the one production model)
+    // The second transverse plane of a plucked string, a fraction sharp of
+    // the first: every partial of a recorded pluck is a doublet that beats.
+    modal_b: ModalString,
     // Published-model pluck (Välimäki 2004): a SHAPED excitation buffer (quill
     // scrape, computed at note-on, fed into the string sample-by-sample) plus a
     // direct LF key-KNOCK that bypasses the string; the release fires a thump.
@@ -182,6 +185,7 @@ impl ArchetVoice {
         Self {
             string: BowedWaveguide::new(sr),
             modal: ModalString::new(sr),
+            modal_b: ModalString::new(sr),
             exc_buf: Vec::new(),
             exc_pos: 0,
             modal_fscale: 1.2,
@@ -711,6 +715,19 @@ impl ArchetVoice {
             self.modal.noise_amt = 0.0;
             self.modal.set_voice_t60(self.freq_hz, stiff, p, &t60law);
             self.modal.reset();
+            // (e) a string vibrates in two transverse planes with slightly
+            // different effective lengths, so every partial is a doublet and
+            // beats. On the anechoic Iowa recordings of the open violin
+            // strings the reliable doublets sit a fraction of a percent
+            // apart with the second line some decibels under the first; the
+            // two figures here are the medians of those measurements, the
+            // detune of the second plane and its level. The two planes share
+            // the loss table, since their losses were not measured apart.
+            const PLANE_DETUNE: f32 = 0.003;
+            const PLANE_LEVEL: f32 = 0.355;
+            self.modal_b.noise_amt = 0.0;
+            self.modal_b.set_voice_t60(self.freq_hz * (1.0 + PLANE_DETUNE), stiff, p, &t60law);
+            self.modal_b.reset();
             // (d) the pluck is a RELEASE, not a blow. The finger pulls the
             // string aside and lets go, so the modes start at a displacement
             // that falls as 1/n^2 and at zero velocity. Harder plucking pulls
@@ -738,7 +755,9 @@ impl ArchetVoice {
             // ~24 dB. This gain is a voicing constant, measured rather than
             // derived: it puts the note back at the peak the bank was voiced
             // against (0.0565 on the repeat profile at D4, velocity 100).
-            self.modal.release(h * 116.0 * (1.0 + self.hum.next() * 0.05), plp, self.freq_hz);
+            let amp = h * 116.0 * (1.0 + self.hum.next() * 0.05);
+            self.modal.release(amp, plp, self.freq_hz);
+            self.modal_b.release(amp * PLANE_LEVEL, plp, self.freq_hz * (1.0 + PLANE_DETUNE));
             // (e) the release: the string leaving the fingertip makes a brief
             // scrape, an order quieter and shorter than a quill's, fed into the
             // string so it is pitch-correlated rather than added noise.
@@ -942,14 +961,18 @@ impl ArchetVoice {
         if patch.pluck {
             // Nothing damps a plucked note on key release; only a finger
             // landing on the same string ends it.
-            self.modal.release_damp = if self.stopped { self.stop_damp } else { 1.0 };
+            let damp = if self.stopped { self.stop_damp } else { 1.0 };
+            self.modal.release_damp = damp;
+            self.modal_b.release_damp = damp;
             // the finger's release scrape, fed into the string
             if self.exc_pos < self.exc_buf.len() {
                 let e = self.exc_buf[self.exc_pos];
                 self.exc_pos += 1;
                 self.modal.excite(e);
             }
-            let bridge = self.modal.process(0.0, 0.0) * self.modal_gain * self.modal_pitch_gain;
+            let bridge = (self.modal.process(0.0, 0.0) + self.modal_b.process(0.0, 0.0))
+                * self.modal_gain
+                * self.modal_pitch_gain;
             let out = self.body.process(bridge);
             self.energy += (out.abs() - self.energy) * 0.001;
             // output_level is applied ONCE, by the engine's voice-sum norm

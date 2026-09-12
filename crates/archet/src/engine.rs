@@ -1890,6 +1890,6 @@ mod golden_audio {
             }
         }
         eprintln!("GOLDEN = {h:#018x}");
-        assert_eq!(h, 0x57c3_3caa_60e8_0c66, "the engine's rendered audio changed");
+        assert_eq!(h, 0x7fac_5f3e_6a7d_61ea, "the engine's rendered audio changed");
     }
 }
