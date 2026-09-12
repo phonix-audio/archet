@@ -351,7 +351,7 @@ impl ArchetVoice {
     /// the A and E are gone within a third of a second. A stopped note on the
     /// string reads the same curve at its own partial frequencies. Only the
     /// violin is measured; the other instruments keep the fitted law.
-    fn measured_pizz_t60(body_index: usize, string: usize) -> Option<&'static [(f32, f32)]> {
+    pub(crate) fn measured_pizz_t60(body_index: usize, string: usize) -> Option<&'static [(f32, f32)]> {
         if body_index != 0 {
             return None;
         }

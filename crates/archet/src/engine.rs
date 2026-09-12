@@ -179,6 +179,17 @@ impl ArchetEngine {
         let fill = if self.patch.ensemble > 8.0 {
             ((self.patch.ensemble - 8.0) / 60.0).clamp(0.0, 1.0)
         } else { 0.0 };
+        // The open strings a plucked note occupies right now cannot ring in
+        // sympathy: they are the strings sounding, under a finger or plucked.
+        let mut held = [false; 4];
+        for v in self.voices[..poly].iter() {
+            if let Some((inst, string)) = v.on_string() {
+                if v.is_active() && inst == self.symp_inst && string < 4 {
+                    held[string] = true;
+                }
+            }
+        }
+        self.symp.set_held(held);
         for frame_idx in 0..frames {
             // Per-voice constant-power panning: in ENSEMBLE mode each unison
             // player is seated at its own azimuth (set at note-on), so the
@@ -562,7 +573,7 @@ mod preset_sweep_tests {
             eng.process_audio(&mut buf, 2);
             for &s in &buf { h = h.rotate_left(7) ^ s.to_bits() as u64; }
         }
-        const GOLDEN: u64 = 0xd5339c2c3efaae5c; // the ensemble render, note-offs included
+        const GOLDEN: u64 = 0x97105677d1b4f26e; // the ensemble render, note-offs included
         assert_eq!(h, GOLDEN, "Archet ensemble render drifted from golden (hash {h:#018x})");
     }
 }
@@ -1879,6 +1890,6 @@ mod golden_audio {
             }
         }
         eprintln!("GOLDEN = {h:#018x}");
-        assert_eq!(h, 0xdda4_5ffb_e2b5_a559, "the engine's rendered audio changed");
+        assert_eq!(h, 0x57c3_3caa_60e8_0c66, "the engine's rendered audio changed");
     }
 }
