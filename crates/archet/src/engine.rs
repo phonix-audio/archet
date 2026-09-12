@@ -996,6 +996,200 @@ mod profile {
         }
     }
 
+    /// The passage `pizz_score` plays: the opening of the third movement of
+    /// Tchaikovsky's fourth symphony, Scherzo, pizzicato ostinato, bars one to
+    /// sixteen, every desk. Read off the Jurgenson-lineage full score and the
+    /// first-violin part on IMSLP and cross-checked against a Breitkopf
+    /// reprint. Two-four, F major, all five desks from the first bar,
+    /// "pizzicato sempre", piano with a swell across bars five to eight and
+    /// again across thirteen to sixteen. The public-domain scores carry no
+    /// metronome mark, so the tempo is the one editorial figure in
+    /// circulation. The double bass is written an octave above where it
+    /// sounds, and sounds here.
+    ///
+    /// Returns tempo, then one entry per note as (desk, onset in beats,
+    /// pitch, velocity, written length in beats).
+    fn score() -> (f32, Vec<(usize, f32, u8, u8, f32)>) {
+        // Four eighth slots per bar, a rest as an empty slot, a double stop
+        // as two pitches. Bars nine to fifteen repeat one to seven; bar
+        // sixteen is its own.
+        const VLN1: [[&[u8]; 4]; 8] = [
+            [&[65], &[64], &[62], &[60]],
+            [&[62], &[64], &[65], &[69]],
+            [&[72], &[], &[72], &[74]],
+            [&[72], &[], &[72], &[74]],
+            [&[72], &[74], &[72], &[74]],
+            [&[72], &[74], &[72], &[77]],
+            [&[76], &[74], &[72], &[71]],
+            [&[69], &[67], &[65], &[64]],
+        ];
+        const VLN1_16: [&[u8]; 4] = [&[69], &[71], &[69, 76], &[]];
+        const VLN2: [[&[u8]; 4]; 8] = [
+            [&[60], &[60], &[57], &[57]],
+            [&[57], &[60], &[60], &[65]],
+            [&[], &[72], &[65, 69], &[65, 69]],
+            [&[], &[72], &[65, 69], &[65, 69]],
+            [&[65, 69], &[65, 69], &[65, 69], &[65, 69]],
+            [&[65, 69], &[65, 69], &[65, 69], &[72]],
+            [&[72], &[69], &[69], &[65]],
+            [&[65], &[62], &[62], &[60]],
+        ];
+        const VLN2_16: [&[u8]; 4] = [&[64], &[65], &[64], &[]];
+        const VLA: [[&[u8]; 4]; 8] = [
+            [&[57], &[57], &[53], &[53]],
+            [&[53], &[55], &[57], &[60]],
+            [&[], &[], &[60], &[62]],
+            [&[], &[], &[60], &[62]],
+            [&[60], &[62], &[60], &[62]],
+            [&[60], &[62], &[60], &[65]],
+            [&[67], &[62], &[64], &[59]],
+            [&[60], &[55], &[57], &[55]],
+        ];
+        const VLA_16: [&[u8]; 4] = [&[60], &[59], &[60], &[]];
+        const VLC: [[&[u8]; 4]; 8] = [
+            [&[41], &[45], &[48], &[53]],
+            [&[50], &[48], &[45], &[41]],
+            [&[], &[], &[53], &[50, 57]],
+            [&[], &[], &[53], &[50, 57]],
+            [&[53], &[50, 57], &[53], &[50, 57]],
+            [&[53], &[50, 57], &[53], &[50, 57]],
+            [&[60], &[53], &[57], &[50]],
+            [&[53], &[46], &[50], &[48]],
+        ];
+        const VLC_16: [&[u8]; 4] = [&[57], &[50], &[57], &[45]];
+        const CB: [[&[u8]; 4]; 8] = [
+            [&[29], &[33], &[36], &[41]],
+            [&[38], &[36], &[33], &[29]],
+            [&[], &[], &[41], &[38]],
+            [&[], &[], &[41], &[38]],
+            [&[41], &[38], &[41], &[38]],
+            [&[41], &[38], &[41], &[45]],
+            [&[48], &[41], &[45], &[38]],
+            [&[41], &[34], &[38], &[36]],
+        ];
+        const CB_16: [&[u8]; 4] = [&[45], &[38], &[45], &[33]];
+        // piano, with the hairpin swelling through bars five to eight
+        const VEL: [u8; 16] = [72, 72, 72, 72, 74, 80, 86, 78, 72, 72, 72, 72, 74, 80, 86, 78];
+        let desks: [(&[[&[u8]; 4]; 8], &[&[u8]; 4]); 5] = [
+            (&VLN1, &VLN1_16),
+            (&VLN2, &VLN2_16),
+            (&VLA, &VLA_16),
+            (&VLC, &VLC_16),
+            (&CB, &CB_16),
+        ];
+        let mut s = Vec::new();
+        for (desk, (bars, last)) in desks.iter().enumerate() {
+            for bar in 1..=16usize {
+                let slots: &[&[u8]; 4] = if bar == 16 { last } else { &bars[(bar - 1) % 8] };
+                for (slot, ps) in slots.iter().enumerate() {
+                    let on = (bar - 1) as f32 * 2.0 + slot as f32 * 0.5;
+                    for &p in ps.iter() {
+                        s.push((desk, on, p, VEL[bar - 1], 0.5));
+                    }
+                }
+            }
+        }
+        (172.0, s)
+    }
+
+    /// A scored passage, desk by desk, on the solo plucked patches.
+    ///
+    /// One engine per desk, each on its own instrument's plucked patch with a
+    /// single voice per note, and the five summed. The section patch cannot
+    /// play a tutti: each of its notes lights eight voices on a pool of
+    /// twenty-four, so three notes in it starts stealing. One player per desk
+    /// keeps every pluck clean, which is what is being judged, and the desks
+    /// sit at the balance the engine already gives each instrument. The viola
+    /// has no plucked preset of its own, so it borrows the violin's with only
+    /// the instrument changed.
+    ///   cargo test --lib engine::profile::pizz_score -- --ignored --nocapture
+    #[test]
+    #[ignore = "diagnostic — run with --ignored"]
+    fn pizz_score() {
+        use crate::patch::{ArchetPatch, Instrument};
+        let sr = 48_000.0_f32;
+        let block = 512usize;
+        let bank = ArchetPatch::factory_presets();
+        let find = |n: &str| {
+            bank.iter()
+                .find(|p| p.name == n)
+                .unwrap_or_else(|| panic!("the bank no longer has {n}"))
+                .clone()
+        };
+        let violin = find("Violin Pizzicato");
+        let mut viola = violin.clone();
+        viola.instrument = Instrument::Viola;
+        viola.name = "Viola Pizzicato".into();
+        let desks: Vec<ArchetPatch> = vec![
+            violin.clone(),
+            violin,
+            viola,
+            find("Cello Pizzicato"),
+            find("Bass Pizzicato"),
+        ];
+        // desk, onset in beats, pitch, velocity, written length in beats;
+        // desks 0 violin I, 1 violin II, 2 viola, 3 cello, 4 double bass
+        let (bpm, score) = score();
+        let score = &score[..];
+        let beat = 60.0 / bpm;
+        let mut engines = Vec::new();
+        for p in &desks {
+            let (mut eng, tx, mr) = ArchetEngine::new_for_plugin(sr);
+            tx.send(ArchetCommand::LoadPatch(Box::new(p.clone()))).unwrap();
+            let mut buf = vec![0.0f32; block * 2];
+            eng.process_audio(&mut buf, 2);
+            engines.push((eng, tx, mr));
+        }
+        let end = score
+            .iter()
+            .map(|n| n.1 + n.4)
+            .fold(0.0f32, f32::max)
+            * beat
+            + 2.5;
+        let mut out: Vec<f32> = Vec::new();
+        let mut buf = vec![0.0f32; block * 2];
+        let mut mix = vec![0.0f32; block];
+        let mut fired = vec![false; score.len()];
+        let mut pending: Vec<(f32, usize, u8)> = Vec::new();
+        let mut t = 0.0f32;
+        while t < end {
+            for (i, &(desk, on, pitch, vel, len)) in score.iter().enumerate() {
+                if !fired[i] && on * beat <= t {
+                    engines[desk].1.send(ArchetCommand::NoteOn(pitch, vel)).unwrap();
+                    pending.push(((on + len) * beat, desk, pitch));
+                    fired[i] = true;
+                }
+            }
+            pending.retain(|&(when, desk, pitch)| {
+                if when > t {
+                    return true;
+                }
+                engines[desk].1.send(ArchetCommand::NoteOff(pitch)).unwrap();
+                false
+            });
+            mix.iter_mut().for_each(|m| *m = 0.0);
+            for (eng, _, _) in engines.iter_mut() {
+                buf.fill(0.0);
+                eng.process_audio(&mut buf, 2);
+                for i in 0..block {
+                    mix[i] += buf[i * 2];
+                }
+            }
+            out.extend_from_slice(&mix);
+            t += block as f32 / sr;
+        }
+        let peak = out.iter().fold(0.0f32, |m, x| m.max(x.abs()));
+        let full = out.iter().filter(|x| x.abs() >= 0.999).count();
+        println!(
+            "  {} notes on {} desks, {:.1} s, peak {peak:.4}, {full} samples at full scale",
+            score.len(),
+            desks.len(),
+            out.len() as f32 / sr
+        );
+        write_wav("/tmp/archet_pizz_score.wav", &out, sr);
+        println!("wrote /tmp/archet_pizz_score.wav");
+    }
+
     /// Acoustic-fit harness: render the violin patch at G3/D4/A4/D5/A5 ->
     /// /tmp/archet_<pitch>.wav, so the harmonic envelope can be measured and
     /// the body/string tuning driven OBJECTIVELY (no listening).
