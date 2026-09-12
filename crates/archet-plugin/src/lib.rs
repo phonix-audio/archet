@@ -511,7 +511,8 @@ impl Plugin for ArchetPlugin {
 
 impl ClapPlugin for ArchetPlugin {
     const CLAP_ID: &'static str = "com.phonix-audio.archet";
-    const CLAP_DESCRIPTION: Option<&'static str> = Some("Bowed-String / Harpsichord Physical Model");
+    const CLAP_DESCRIPTION: Option<&'static str> =
+        Some("A bowed string: the violin family, drawn with the bow or plucked");
     const CLAP_MANUAL_URL: Option<&'static str> = None;
     const CLAP_SUPPORT_URL: Option<&'static str> = None;
     // What this plugin IS, in the vocabulary each format publishes. A host
