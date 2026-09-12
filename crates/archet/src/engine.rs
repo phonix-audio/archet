@@ -636,6 +636,52 @@ mod profile {
         println!("wrote /tmp/archet_pizz_spread.wav, one pitch plucked {notes} times");
     }
 
+    /// Whether the upper register stays inside full scale.
+    ///
+    /// The pluck corner follows the pitch and has no ceiling, so a high note
+    /// releases a shape reaching further up in rank than a low one's, and the
+    /// bridge weights the modes by rank. An analytic peak does not settle this:
+    /// the shape term falls towards the treble while the rendered peak rises,
+    /// so the body and the integrator weigh as much as the excitation. One
+    /// pluck every few semitones at full velocity, the loudest case there is.
+    ///   cargo test --lib engine::profile::pizz_register -- --ignored --nocapture
+    #[test]
+    #[ignore = "diagnostic — run with --ignored"]
+    fn pizz_register() {
+        let sr = 48_000.0_f32;
+        let bank = crate::patch::ArchetPatch::factory_presets();
+        let preset = bank
+            .iter()
+            .find(|p| p.name == "Violin Pizzicato")
+            .expect("the bank no longer has Violin Pizzicato");
+        let block = 512usize;
+        let per = (1.2 * sr) as usize / block;
+        let mut all: Vec<f32> = Vec::new();
+        println!("  pitch     peak   at full scale");
+        for pitch in (55u8..=96).step_by(3) {
+            let (mut eng, tx, _mr) = ArchetEngine::new_for_plugin(sr);
+            let mut p = preset.clone();
+            p.polyphony = 1;
+            tx.send(ArchetCommand::LoadPatch(Box::new(p))).unwrap();
+            tx.send(ArchetCommand::NoteOn(pitch, 127)).unwrap();
+            let mut out: Vec<f32> = Vec::new();
+            let mut buf = vec![0.0f32; block * 2];
+            for _ in 0..per {
+                buf.fill(0.0);
+                eng.process_audio(&mut buf, 2);
+                for i in 0..block {
+                    out.push(buf[i * 2]);
+                }
+            }
+            let peak = out.iter().fold(0.0f32, |m, x| m.max(x.abs()));
+            let full = out.iter().filter(|x| x.abs() >= 0.999).count();
+            println!("  {pitch:>5}   {peak:6.4}   {full:>13}");
+            all.extend_from_slice(&out);
+        }
+        write_wav("/tmp/archet_pizz_register.wav", &all, sr);
+        println!("wrote /tmp/archet_pizz_register.wav");
+    }
+
     /// Acoustic-fit harness: render the violin patch at G3/D4/A4/D5/A5 ->
     /// /tmp/archet_<pitch>.wav, so the harmonic envelope can be measured and
     /// the body/string tuning driven OBJECTIVELY (no listening).
