@@ -362,6 +362,29 @@ impl ArchetVoice {
         let b2m = 1.0f32;
         (b1 * b1m, b2 * b2m, stiff, beta)
     }
+
+    /// The string's own loss coefficients, for the plucked articulation:
+    /// friction (internal) and air, with bending shared. Woodhouse, Plucked
+    /// guitar transients, Acta Acustica 90 (2004), eq. 8: the loss factor of
+    /// mode n is
+    ///
+    ///   eta_n = [eta_F + eta_A / w_n + s n^2 eta_B] / [1 + s n^2]
+    ///
+    /// in this crate's normalisation, where `s` is the stiffness already used
+    /// for the mode frequencies. The FORM is the published one; the values are
+    /// fitted to this instrument's own voicing over its whole range, which is
+    /// what that paper does too. Measured violin coefficients exist (Pickering,
+    /// Catgut Acoust. Soc. J. 44, 1985) but are not freely available; that the
+    /// four fits land within 40% of each other is the check that they are
+    /// string properties and not per-note curve bending.
+    fn string_losses(body_index: usize) -> (f32, f32) {
+        match body_index {
+            0 => (6.814e-4, 5.79), // violin
+            1 => (7.040e-4, 5.25), // viola
+            2 => (8.169e-4, 5.13), // cello
+            _ => (9.752e-4, 5.18), // double bass
+        }
+    }
     fn freq_tuned(note: u8, patch: &ArchetPatch) -> f32 {
         Self::freq_of(note) * 2f32.powf(patch.tune_cents / 1200.0)
     }
@@ -517,22 +540,27 @@ impl ArchetVoice {
             // the compass because the jack rail is fixed and the string is not;
             // a finger does not.
             let p = 0.20f32;
-            // (b) per-partial T60: a pizzicato is short. The low strings ring
-            // between one and two seconds, the high ones well under, and the
-            // upper partials go first because the finger damping and the
-            // bridge losses both rise with frequency (Woodhouse 2004).
-            let t60_1 = (2.4 * (self.freq_hz / 196.0).powf(-0.55)).clamp(0.35, 2.6);
-            let kslope = 0.16 + self.freq_hz * 0.00012;
-            let r_rate = 1.0 / (8.0 + self.hum.next().abs() * 4.0);
-            let rphase = self.hum.next() * std::f32::consts::PI;
+            // (b) the same string the bow uses, with the same stiffness law.
+            let (_, _, stiff, _) = Self::modal_params(self.inst_idx, self.freq_hz);
+            // (c) per-partial decay from the string's losses rather than a
+            // fitted curve: friction, air and bending, combined by Woodhouse's
+            // eq. 8 (see `string_losses`). The curve this replaces floored
+            // every partial at 100 ms, so a top-string pizzicato kept its high
+            // modes alive a tenth of a second at every pitch; the losses let
+            // mode 40 die in 16 ms up there, which is what a plucked string
+            // does. Its cosine ripple is gone with it: real strings ripple
+            // because the two polarisations beat, and this model has one
+            // polarisation, so the ripple was decoration.
+            let (eta_f, eta_a) = Self::string_losses(self.inst_idx);
+            const ETA_B: f32 = 2.0e-2;
+            let f0 = self.freq_hz;
             let t60law = move |k: usize| -> f32 {
                 let kf = k as f32;
-                let trend = t60_1 / (1.0 + kslope * (kf - 1.0));
-                (trend * (1.0 + 0.22 * (std::f32::consts::TAU * kf * r_rate + rphase).cos()))
-                    .max(0.10)
+                let sk = stiff * kf * kf;
+                let wn = std::f32::consts::TAU * f0 * kf * (1.0 + sk).sqrt();
+                let eta = (eta_f + eta_a / wn + sk * ETA_B) / (1.0 + sk);
+                (6.9078 / (eta * wn * 0.5)).max(0.005)
             };
-            // (c) the same string the bow uses, with the same stiffness law.
-            let (_, _, stiff, _) = Self::modal_params(self.inst_idx, self.freq_hz);
             self.modal.noise_amt = 0.0;
             self.modal.set_voice_t60(self.freq_hz, stiff, p, &t60law);
             self.modal.reset();
