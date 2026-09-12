@@ -24,10 +24,11 @@ use crate::theme;
 
 /// The size the layout is drawn for. The window is fixed at this.
 pub const W: f32 = 1160.0;
-pub const H: f32 = 826.0;
+pub const H: f32 = 770.0;
 /// The panel's height inside the case, the chrome above and the keyboard
-/// below taken off.
-pub const PANEL_H: f32 = 658.0;
+/// below taken off. The head band went with the nameplate: the name and
+/// what the instrument is are in the shared header now.
+pub const PANEL_H: f32 = 602.0;
 const KEYBOARD_H: f32 = 104.0;
 
 /// The four bodies, in the engine's own order.
@@ -148,10 +149,9 @@ impl ArchetApp {
                 theme::gradient_v(ui, full, Color32::from_rgb(26, 22, 20), Color32::from_rgb(10, 9, 8));
                 let case = Rect::from_min_max(full.min + Vec2::new(8.0, 6.0), full.max - Vec2::new(8.0, 10.0));
                 let panel = machine::case(ui, case);
-                machine::nameplate(ui, geom::tier(panel, 0), ROSIN);
-                self.draw_bow(ui, geom::tier(panel, 1));
-                self.draw_body(ui, geom::tier(panel, 2));
-                self.draw_player(ui, geom::tier(panel, 3));
+                self.draw_bow(ui, geom::tier(panel, 0));
+                self.draw_body(ui, geom::tier(panel, 1));
+                self.draw_player(ui, geom::tier(panel, 2));
             });
     }
 
@@ -176,7 +176,9 @@ impl ArchetApp {
             // The chrome reads a fraction; the engine publishes a percent.
             cpu: Some(self.cached_meter.cpu_percent / 100.0),
             preset_salt: "archet",
-            subtitle: None, patch_name: None, buttons: &[],
+            // What the panel's own nameplate used to print under this bar.
+            subtitle: Some("A BOW ON A STRING, THROUGH A BODY"),
+            patch_name: None, buttons: &[],
             mode_pills: &[],
             status_right: Some(&status),
         };
@@ -445,7 +447,7 @@ mod tests {
     fn the_window_holds_what_it_draws() {
         assert!(PANEL_H + KEYBOARD_H < H, "the panel and the keyboard do not fit {H}");
         assert!(H - PANEL_H - KEYBOARD_H >= 40.0, "no room left for the chrome");
-        assert_eq!((W, H), (1160.0, 826.0));
+        assert_eq!((W, H), (1160.0, 770.0));
     }
 
     #[test]

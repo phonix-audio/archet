@@ -21,7 +21,6 @@ pub const KNOB_SMALL: f32 = 24.0;
 pub const CELL: f32 = phonix_ui::widgets::KNOB_GROUP_W;
 
 /// The tiers, and the air between them.
-pub const HEAD_H: f32 = 46.0;
 pub const BOW_H: f32 = 188.0;
 pub const BODY_H: f32 = 186.0;
 pub const PLAYER_H: f32 = 172.0;
@@ -32,14 +31,14 @@ pub const MARGIN: f32 = 14.0;
 
 /// The band a tier occupies, inside the panel's margin.
 pub fn tier(panel: Rect, index: usize) -> Rect {
-    let heights = [HEAD_H, BOW_H, BODY_H, PLAYER_H];
+    let heights = [BOW_H, BODY_H, PLAYER_H];
     let mut y = panel.top() + MARGIN;
     for h in heights.iter().take(index) {
         y += h + TIER_GAP;
     }
     Rect::from_min_size(
         Pos2::new(panel.left() + MARGIN, y),
-        Vec2::new(panel.width() - MARGIN * 2.0, heights[index.min(3)]),
+        Vec2::new(panel.width() - MARGIN * 2.0, heights[index.min(2)]),
     )
 }
 
@@ -175,9 +174,9 @@ mod tests {
     /// The tiers fit the panel the plugin asks a host for.
     #[test]
     fn the_tiers_fit_the_panel() {
-        let need = MARGIN * 2.0 + HEAD_H + BOW_H + BODY_H + PLAYER_H + TIER_GAP * 3.0;
+        let need = MARGIN * 2.0 + BOW_H + BODY_H + PLAYER_H + TIER_GAP * 2.0;
         assert!(need <= crate::app::PANEL_H, "{need} > {}", crate::app::PANEL_H);
-        let last = tier(panel(), 3);
+        let last = tier(panel(), 2);
         assert!(last.bottom() <= crate::app::PANEL_H, "the last tier ends at {}", last.bottom());
         assert!(last.right() <= crate::app::W, "the last tier ends at {}", last.right());
     }
@@ -186,7 +185,7 @@ mod tests {
     #[test]
     fn the_tiers_do_not_overlap() {
         let p = panel();
-        for i in 0..3 {
+        for i in 0..2 {
             let a = tier(p, i);
             let b = tier(p, i + 1);
             assert!(a.bottom() <= b.top(), "tier {i} runs into tier {}", i + 1);
@@ -199,7 +198,7 @@ mod tests {
     #[test]
     fn every_part_stays_in_its_tier() {
         let p = panel();
-        let bow = tier(p, 1);
+        let bow = tier(p, 0);
         for r in [string_window(bow), string_field(bow)] {
             assert!(bow.contains_rect(r), "{r:?} leaves the bow tier");
         }
@@ -210,7 +209,7 @@ mod tests {
                 assert!(at.y + KNOB + 22.0 <= bow.bottom(), "a bow knob falls out of the tier");
             }
         }
-        let body = tier(p, 2);
+        let body = tier(p, 1);
         for i in 0..4 {
             assert!(body.contains_rect(body_cell(body, i)), "body {i} leaves the tier");
         }
@@ -225,7 +224,7 @@ mod tests {
                 assert!(at.y + KNOB + 22.0 <= body.bottom(), "a body knob falls out of the tier");
             }
         }
-        let player = tier(p, 3);
+        let player = tier(p, 2);
         assert!(player.contains_rect(meter(player)));
         for row in 0..2 {
             for i in 0..5 {

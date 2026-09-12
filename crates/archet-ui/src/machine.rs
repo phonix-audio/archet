@@ -31,19 +31,6 @@ pub fn case(ui: &Ui, rect: Rect) -> Rect {
     )
 }
 
-/// The instrument's name, and what it is.
-pub fn nameplate(ui: &Ui, rect: Rect, tint: Color32) {
-    theme::tracked(ui, Pos2::new(rect.left(), rect.top() + 14.0), "ARCHET",
-                   FontId::proportional(19.0), SILK, 3.4);
-    theme::tracked(ui, Pos2::new(rect.left() + 148.0, rect.top() + 16.0),
-                   "A BOW ON A STRING, THROUGH A BODY",
-                   FontId::proportional(8.0), SILK_DIM, 1.6);
-    ui.painter().line_segment(
-        [Pos2::new(rect.left(), rect.top() + 30.0), Pos2::new(rect.right(), rect.top() + 30.0)],
-        Stroke::new(1.0_f32, tint),
-    );
-}
-
 /// A row of exclusive choices in a slot cut into the plate.
 pub fn switch(ui: &mut Ui, rect: Rect, labels: &[&str], sel: usize, tint: Color32, salt: &str) -> Option<usize> {
     theme::recess(ui, rect, 3.0);
