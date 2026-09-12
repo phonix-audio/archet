@@ -531,10 +531,12 @@ mod preset_sweep_tests {
 mod profile {
     use super::*;
 
-    /// Acoustic-fit harness: render the violin patch at G3/D4/A4/D5/A5 (the same
-    /// notes as the timidity FluidR3 reference) -> /tmp/archet_<pitch>.wav, so a
-    /// Python script can measure the harmonic-envelope distance to the real violin
-    /// and drive the body/string tuning OBJECTIVELY (no listening).
+    /// Acoustic-fit harness: render the violin patch at G3/D4/A4/D5/A5 ->
+    /// /tmp/archet_<pitch>.wav, so the harmonic envelope can be measured and
+    /// the body/string tuning driven OBJECTIVELY (no listening). What it is
+    /// measured against belongs in the acoustics literature, not in a
+    /// sampler: the body's own targets are the published signature modes and
+    /// Duennwald's band profile, which `body::tests::dunnwald` prints.
     ///   cargo test --lib archet::engine::profile::violin_fit -- --ignored --nocapture
     #[test]
     #[ignore = "diagnostic — run with --ignored"]
@@ -751,8 +753,8 @@ mod profile {
 
 
     /// Full-range fit: render Archet for EACH instrument (violin/viola/cello/bass)
-    /// across its real range -> /tmp/archetf_<inst>_<pitch>.wav, to compare against
-    /// the timidity FluidR3 references (GM 40/41/42/43) per instrument per register.
+    /// across its real range -> /tmp/archetf_<inst>_<pitch>.wav, so each register
+    /// can be measured for the body's published band targets.
     ///   cargo test --lib archet::engine::profile::full_range_fit -- --ignored --nocapture
     #[test]
     #[ignore = "diagnostic — run with --ignored"]
@@ -782,9 +784,8 @@ mod profile {
         println!("wrote /tmp/archetf_<inst>_<pitch>.wav for violin/viola/cello/contrabass");
     }
 
-    /// Isolate the Archet DOUBLE BASS at real low pitches so we can compare it to
-    /// the real contrabass (timidity GM 43) and see if it behaves like a bowed
-    /// string or a synth saw. -> /tmp/archet_bass_<pitch>.wav
+    /// Isolate the Archet DOUBLE BASS at real low pitches, to hear whether it
+    /// behaves like a bowed string or a synth saw. -> /tmp/archet_bass_<pitch>.wav
     ///   cargo test --lib archet::engine::profile::dump_bass -- --ignored --nocapture
     #[test]
     #[ignore = "diagnostic — run with --ignored"]

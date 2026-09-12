@@ -1,10 +1,11 @@
-//! Procedural violin BODY for Archet, fitted to a REAL violin's measured body
-//! response (commuted synthesis, source-filter form).
+//! Procedural violin BODY for Archet (commuted synthesis, source-filter form).
 //!
-//! The body magnitude was extracted empirically from the FluidR3 GM violin
-//! across its range (the radiated harmonic envelope divided by the string's 1/n
-//! Helmholtz spectrum gives the body transfer function vs frequency). The result
-//! is NOT a simple lowpass -- it is a specific formant structure:
+//! The signature-mode frequencies and their identifications are the published
+//! ones (Gough, Acoustics Today 2016; Woodhouse, Rep. Prog. Phys. 2014), and
+//! the band gains are aimed at Duennwald's old-Italian profile (1991, via
+//! Buen) -- the `dunnwald` diagnostic below prints the three band criteria,
+//! though it does not yet assert them. The result is NOT a simple lowpass --
+//! it is a specific formant structure:
 //!
 //!   A0 air  ~280 Hz  (+)        B1- corpus ~410 Hz (++ strongest)
 //!   B1+     ~620 Hz  (+)        wood peak  ~1000 Hz (+)
