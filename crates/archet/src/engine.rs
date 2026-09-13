@@ -195,6 +195,9 @@ impl ArchetEngine {
     }
 
     pub fn process_audio(&mut self, output: &mut [f32], channels: usize) {
+        // A body ringing down reaches denormal range in every one of its
+        // resonators, and a denormal biquad costs fifty times a normal one.
+        phonix_rt::denormal::enable_flush_to_zero();
         let frames = output.len() / channels.max(1);
         self.process_commands();
 
@@ -1237,6 +1240,37 @@ mod profile {
         for (i, p) in mk.iter().enumerate() {
             println!("  {:<12} {:>9.1} {:>12.3}", p.name, 10.0 * mean[i].max(1e-18).log10(),
                      (mean[0] / mean[i]).sqrt() * crate::voice::ArchetVoice::inst_level(p.instrument.body_index()));
+        }
+    }
+
+    /// Where a voice's time goes: the body bank and the modal string, each
+    /// run alone for a second of samples, per instrument, with the number
+    /// of resonators the body carries.
+    ///   cargo test --release --lib engine::profile::voice_cost -- --ignored --nocapture
+    #[test]
+    #[ignore = "diagnostic - run with --ignored"]
+    fn voice_cost() {
+        phonix_rt::denormal::enable_flush_to_zero();
+        let sr = 48_000.0f32;
+        let n = sr as usize;
+        println!("  {:<6} {:>6} {:>10} {:>10}", "body", "modes", "body us/s", "string us/s");
+        for (inst, f0) in [(0usize, 440.0f32), (1, 220.0), (2, 110.0), (3, 55.0)] {
+            let mut body = crate::body::ModalBody::new(sr, inst, 1.0, 9.0);
+            let modes = body.modes();
+            let t = std::time::Instant::now();
+            let mut acc = 0.0f32;
+            for i in 0..n {
+                acc += body.process(if i == 0 { 1.0 } else { 0.0 });
+            }
+            let body_us = t.elapsed().as_secs_f64() * 1e6;
+            let mut string = crate::modal::ModalString::new(sr);
+            string.set_voice(f0, 1.0, 0.02, 1e-4, 0.12);
+            let t = std::time::Instant::now();
+            for _ in 0..n {
+                acc += string.process(0.3, 0.5);
+            }
+            let string_us = t.elapsed().as_secs_f64() * 1e6;
+            println!("  {:<6} {:>6} {:>10.0} {:>10.0}   ({acc:.3})", inst, modes, body_us, string_us);
         }
     }
 

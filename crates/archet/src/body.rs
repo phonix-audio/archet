@@ -351,6 +351,11 @@ impl ModalBody {
         self.norm = 30.0 / gsum.sqrt();
     }
 
+    /// The resonators the bank carries.
+    pub fn modes(&self) -> usize {
+        self.res.len()
+    }
+
     #[inline]
     pub fn process(&mut self, x: f32) -> f32 {
         let xin = self.hp.process(x);
