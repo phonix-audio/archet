@@ -1,22 +1,15 @@
-//! Archet SECTION model - turn the small real-voice pool into a large
-//! string section at fixed (size-independent) cost.
+//! The section model: a bounded pool of physical voices thickened into a
+//! large string section at a cost independent of the section's size.
 //!
-//! Why not N physical voices: rendering 100 bowed waveguides is impossible
-//! and perceptually pointless (Ternstroem: independent-source richness
-//! saturates by ~8-12 voices). The engine renders a bounded pool of real
-//! decorrelated voices (true physical timbre + ~14-cent static F0 scatter);
-//! this module thickens it toward the large-section texture, O(1) in size.
-//!
-//! ALGORITHM = the classic string-ensemble CHORUS (Roland/ARP BBD ensemble,
-//! Solina; Dattorro "Effect Design"; Zoelzer DAFX modulation chapter), NOT
-//! an all-pass diffuser and NOT a fixed/velvet delay. Each extra "player" is
-//! a copy read from a delay line whose length is MODULATED slowly, so the
-//! copy is DOPPLER-DETUNED by a few cents -- exactly like a real player at a
-//! slightly different, wandering pitch. Detuned (not merely delayed) copies
-//! broaden each partial into a band (no static comb notches: the residual
-//! comb continuously SWEEPS = the natural ensemble shimmer, not metallic
-//! coloration). Independent per-tap modulation phases give the vibrato/pitch
-//! ASYNCHRONY that is the primary "many players" cue. Cost = N taps, flat.
+//! The richness of independent sources saturates by some eight to twelve
+//! players (Ternstroem), so the engine renders that many decorrelated
+//! voices and this module adds the rest of the section as copies. Each
+//! copy is read from a delay line whose length is modulated slowly, so it
+//! is Doppler-detuned by a few cents, as a player at a slightly different,
+//! wandering pitch is (the string-ensemble chorus: Dattorro, Effect
+//! Design; Zoelzer, DAFX, modulation chapter). Detuned copies broaden each
+//! partial into a band and the residual comb keeps sweeping; independent
+//! modulation phases per tap give the pitch asynchrony of many players.
 
 const N_TAPS: usize = 8;     // extra detuned copies = perceived players
 const BASE_MIN_MS: f32 = 12.0;
@@ -45,9 +38,9 @@ pub struct SectionDiffuser {
 
 impl SectionDiffuser {
     pub fn new(sr: f32) -> Self {
-        // deterministic per-tap LFO rates/phases (no Math.random): three
-        // incommensurate low rates near 0.3-0.8 Hz, jittered per tap, so no
-        // two copies ever share a pitch trajectory (asynchrony).
+        // Deterministic per-tap LFO rates and phases: three incommensurate
+        // low rates near 0.3-0.8 Hz, jittered per tap, so no two copies
+        // share a pitch trajectory.
         let mut seed = 0x2545_F491u32;
         let mut rnd = || {
             seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5;
@@ -125,11 +118,9 @@ impl SectionDiffuser {
 
         self.w = (self.w + 1) % len;
 
-        // SIZE -> WEIGHT. The detuned-copy layer is ADDED on top of the full
-        // dry pool (not equal-power-swapped) so a bigger section is genuinely
-        // denser AND heavier (more bows = more energy: the "poids des notes"),
-        // and a low-shelf body grows with size for spectral DEPTH. Both scale
-        // with fill, so 100 is audibly weightier/deeper than 14, at flat cost.
+        // Size gives weight: the detuned copies are added on top of the full
+        // dry pool, so a bigger section is denser and louder, and a low
+        // shelf grows with the size. Both scale with fill.
         let wet_gain = 0.20 + 0.95 * fill;
         let mut ol = l + wl * wet_gain;
         let mut or_ = r + wr * wet_gain;

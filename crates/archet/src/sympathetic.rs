@@ -1,12 +1,10 @@
-//! Sympathetic open-string resonators - the fine-instrument "ring".
+//! Sympathetic open strings.
 //!
-//! On a real (and especially a fine old Italian) violin the un-played OPEN strings
-//! resonate sympathetically with the played notes - strongest when a note matches an
-//! open-string harmonic (G3/D4/A4/E5 on a violin) - and keep ringing between and
-//! after notes. That persistent halo around the playing is a defining part of the
-//! "Stradivarius" glow. Modelled as four damped string loops (feedback comb with
-//! fractional delay + loop lowpass, T60 ~1.5 s) per ENGINE, fed by the summed dry
-//! output and NEVER reset between notes, so runs leave a ringing aura.
+//! The open strings that are not played resonate with the played notes,
+//! most when a note matches one of their harmonics, and keep ringing
+//! between and after notes. Four damped string loops per engine (a
+//! feedback comb with a fractional delay and a loop lowpass), fed by the
+//! summed dry output and never reset between notes.
 
 struct Comb {
     buf: Vec<f32>,
@@ -88,7 +86,7 @@ impl SympStrings {
         }
     }
 
-    /// Feed the dry engine sum; returns the WET halo only (mix it in at ~-20 dB).
+    /// Feed the dry engine sum; returns the wet halo only, mixed in at about -20 dB.
     #[inline]
     pub fn process(&mut self, x: f32) -> f32 {
         let drive = x * 0.25; // weak bridge->string coupling
@@ -100,8 +98,8 @@ impl SympStrings {
         y
     }
 
-    /// Still ringing? (keeps the engine processing through rests so the halo
-    /// doesn't cut off when all voices go idle)
+    /// Whether the strings still ring: the engine keeps processing through
+    /// rests while they do.
     pub fn active(&self) -> bool {
         self.energy > 1.0e-5
     }

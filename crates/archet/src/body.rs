@@ -1,34 +1,25 @@
-//! Procedural violin BODY for Archet (commuted synthesis, source-filter form).
+//! The instrument's body: a parallel bank of resonators the bridge force
+//! runs through.
 //!
-//! The signature-mode frequencies and their identifications are the published
-//! ones (Gough, Acoustics Today 2016; Woodhouse, Rep. Prog. Phys. 2014), and
-//! the band gains are aimed at Duennwald's old-Italian profile (1991, via
-//! Buen) -- the `dunnwald` diagnostic below prints the three band criteria,
-//! though it does not yet assert them. The result is NOT a simple lowpass --
-//! it is a specific formant structure:
-//!
-//!   A0 air  ~280 Hz  (+)        B1- corpus ~410 Hz (++ strongest)
-//!   B1+     ~620 Hz  (+)        wood peak  ~1000 Hz (+)
-//!   VALLEY  ~1300-1700 Hz (-)   transition ~2000-2600 Hz
-//!   peak    ~3000 Hz  (+)       roll-off   above ~3300 Hz
-//!   plus radiation roll-off below the A0 air resonance.
-//!
-//! Implemented as a cascade of peaking EQ sections (matching that magnitude on
-//! the broadband string signal, so all harmonics are preserved) bracketed by the
-//! sub-A0 highpass and the HF roll-off lowpass. Fitted/validated against the
-//! reference by `violin_fit`. Mode identifications after Gough (Acoustics Today
-//! 2016) / Woodhouse (Rep. Prog. Phys. 2014).
+//! Each body holds its measured signature modes (Gough, Acoustics Today
+//! 2016; Woodhouse, Rep. Prog. Phys. 2014, for the violin; the other
+//! instruments cite their sources on their tables) and, above them, a
+//! statistical bank laid out at the modal overlap a body shows there,
+//! shaped by a bridge hill and two roll-offs, between a radiation
+//! high-pass below the air mode and a low-pass above the brilliance band.
+//! Levels are calibrated against third-octave envelopes of anechoic
+//! recordings of each instrument's open strings; the `dunnwald` diagnostic
+//! prints Duennwald's band criteria for the violin.
 
 use std::f32::consts::PI;
 
 /// The body's biquad: the shared DF2T core plus archet's own coefficient
 /// derivation.
 ///
-/// The derivation stays here rather than moving into `dsp::filters` because it
-/// is not the codebase's: `2.0 * PI * (f0 / fs)` rounds differently from the
-/// `2.0 * PI * f0 / fs` used elsewhere (35% of inputs), and the Q floors below
-/// (0.2 / 0.3 / 0.05) are archet's alone. Every body model here is voiced
-/// against exactly these numbers.
+/// The derivation is archet's own: `2.0 * PI * (f0 / fs)` rounds differently
+/// from the `2.0 * PI * f0 / fs` of `dsp::filters`, and the Q floors below
+/// (0.2 / 0.3 / 0.05) are archet's. Every body is voiced against exactly
+/// these numbers, and the pinned test below holds them.
 #[derive(Debug, Clone, Default)]
 pub struct Biquad(phonix_dsp::filters::BiquadT);
 
@@ -73,24 +64,12 @@ impl Biquad {
     }
 }
 
-/// DENSE modal body: a parallel bank of resonators. A few EQ peaks read as a reed /
-/// accordion -- a real violin body is DOZENS of overlapping modes with only moderate
-/// Q (~25-50), and above ~1 kHz it is a STATISTICAL jagged field, not isolated peaks
-/// (Gough 2016, Woodhouse 2014, Bissinger; the "wooden" timbre IS that density). So:
-///   (a) ~9 discrete SIGNATURE modes < ~1.3 kHz (A0/CBR/A1/B1-/B1+ ...), strong
-///       B1+/B1-/A0, weak CBR/A1, a few-dB dip through 650-1300 Hz (Duennwald anti-
-///       nasality -- the single biggest anti-reed lever);
-///   (b) ~40 STATISTICAL modes 1.3-11 kHz, equally spaced ~170 Hz then JITTERED
-///       (deterministic) so the response is jagged not comb-like, Q 35-55, gains
-///       jittered, valleys only ~12-15 dB deep (overlapping skirts), shaped by the
-///       broad BRIDGE HILL (~2.4 kHz) and a -12 dB/oct roll-off above ~3 kHz.
-/// Each instrument has its own pattern, from its own measured modes (see the
-/// specs below): a bass is not a violin scaled down, its air resonance sits
-/// at a quarter of the violin's and its bridge hill below a kilohertz.
-/// Output = parallel SUM of the resonators (the modal admittance), not a series EQ.
-// Gains CALIBRATED to Duennwald's old-Italian profile via the `dunnwald` test below:
-// the A band (190-650, sonority) must be STRONG, the 650-1300 band suppressed
-// (anti-nasality +4..6 dB), brilliance balanced with A, >4200 Hz well down (clarity).
+/// The violin's signature modes below 1.3 kHz (A0, CBR, A1, B1-, B1+ and
+/// the region up to the bank), as (Hz, Q, dB). Frequencies and
+/// identifications after Gough 2016 and Woodhouse 2014; widths in the
+/// range Bissinger measures; levels calibrated on the anechoic recordings
+/// of the open strings. The output is the parallel sum of the resonators,
+/// the modal admittance.
 const SIG_VIOLIN: &[(f32, f32, f32)] = &[
     (275.0, 10.0, 6.0),   // A0  main air (monopole)
     (405.0, 14.0, 4.0),   // CBR
@@ -290,8 +269,8 @@ pub fn envelope_db(inst: usize, bridge_hill_db: f32, hz: f32) -> f32 {
 pub struct ModalBody {
     hp: Biquad,
     res: Vec<(Biquad, f32)>, // parallel resonators (bandpass) and their gains
-    lp: Biquad, // output roll-off: the F band (4200-6879) rides the mode SKIRTS, a
-    // per-mode gain roll can't reach it -- Duennwald clarity needs this cut.
+    lp: Biquad, // output roll-off above the brilliance band: the F band
+    // (4200-6879) rides the mode skirts, which a per-mode gain does not reach.
     norm: f32,
 }
 
@@ -324,10 +303,9 @@ impl ModalBody {
             let fc = (f * detune).clamp(25.0, nyq);
             res.push((Biquad::bandpass(fs, fc, q), 10f32.powf(g / 20.0)));
         }
-        // (b) statistical bank: dense, deterministically jittered. The seed is PER-VOICE
-        // (folds in `detune`, which is unique per voice) so each player's body is its own
-        // irregular shape -- otherwise every violin gets the IDENTICAL jagged response and
-        // they reinforce into one static buzz = a bank of accordion reeds.
+        // (b) the statistical bank, deterministically jittered. The seed is
+        // per voice (it folds in `detune`, unique per voice) so each player's
+        // body is its own irregular shape and the players do not reinforce.
         let mut seed: u32 = 0x9E37_79B9
             ^ ((inst as u32 + 1).wrapping_mul(2654435761))
             ^ detune.to_bits();
@@ -355,8 +333,7 @@ impl ModalBody {
             // density relative to the spacing the level was calibrated at.
             let share_db = -10.0 * (s.level_spacing / spacing).max(1.0).log10();
             let g_db = s.bank_db + hump + roll + roll2 + share_db + (rng() - 0.5) * 8.0;
-            // Q: violin-family modes RING. They are real corpus modes, masked
-            // under the bow's continuous excitation.
+            // The modes' Q, in the range measured on violin bodies.
             let q = BANK_Q * (0.8 + rng() * 0.4);
             res.push((Biquad::bandpass(fs, fc, q), 10f32.powf(g_db / 20.0)));
             f += spacing;
@@ -439,11 +416,11 @@ mod tests {
         println!("  anti-nasality A-B = {:+.1} dB (want +4..+6)", a - b);
         println!("  brilliance  DE-A = {:+.1} dB (want > -3)", de - a);
         println!("  clarity     DE-F = {:+.1} dB (want >= +10)", de - f_);
-        // The band integrals say nothing about TIME: a bank at Q 35 and one at
-        // Q 500 can share them exactly. What decides whether the body knocks
-        // like wood or drones is how fast its own impulse response dies, and
-        // how much of its energy lands in the first few milliseconds. Measured
-        // on the envelope, with no filter in the path: a band-limited decay
+        // The band integrals say nothing about time: a bank at Q 35 and one
+        // at Q 500 can share them exactly. The ring of the body is how fast
+        // its impulse response dies and how much of its energy lands in the
+        // first few milliseconds. Measured on the envelope, with no filter in
+        // the path: a band-limited decay
         // read through a brick wall measures the wall.
         let hop = (0.001 * fs) as usize;
         let env: Vec<f32> = h
@@ -495,9 +472,8 @@ mod shared_filter_migration {
         sig
     }
     fn hash(o: &[f32]) -> u64 { o.iter().fold(0u64, |a, &v| a.rotate_left(7) ^ v.to_bits() as u64) }
-    /// The body EQ moved onto the shared DF2T core. These hashes were captured
-    /// from the hand-rolled biquad before the move: archet's own w0 rounding and
-    /// Q floors must survive it, or every body model is re-voiced.
+    /// The body's biquad on the shared DF2T core reproduces these hashes:
+    /// archet's own w0 rounding and Q floors hold, or every body is re-voiced.
     #[test]
     fn body_biquad_survived_the_dsp_filters_migration() { 
         let sig = probe();

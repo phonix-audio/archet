@@ -79,7 +79,7 @@ impl ArchetParam {
 }
 
 impl Instrument {
-    /// Index tables. Written out because this is the GUI/audio WIRE FORMAT:
+    /// Index tables. Written out because this is the GUI/audio wire format:
     /// the declarative layout stores the choice as a number, so the order is
     /// data, not an implementation detail of the enum.
     pub const ALL_ORDERED: [Instrument; 4] = [
@@ -146,13 +146,13 @@ pub struct ArchetPatch {
     pub name: String,
     #[serde(default)]
     pub instrument: Instrument,
-    /// Full-range ENSEMBLE mode: pick the instrument body PER NOTE from its pitch
+    /// Full-range ensemble mode: pick the instrument body per note from its pitch
     /// (violin/viola/cello/bass) instead of one fixed instrument. Lets a single engine
     /// render a composite string desk (a GM String-Ensemble track spans the whole
     /// choir) -- so the render is ONE engine per MIDI track, not one per pitch-band.
     #[serde(default)]
     pub auto_range: bool,
-    /// PLUCKED articulation (pizzicato): a one-shot fingertip excitation then a
+    /// Plucked articulation (pizzicato): a one-shot fingertip excitation then a
     /// free modal ring-down -- no bow, no gesture, no vibrato. Nothing damps it on
     /// note-off, because a finger leaves the string and the note decays by its own
     /// losses. The force follows the velocity: a finger plucks harder or softer.
@@ -224,20 +224,17 @@ pub struct ArchetPatch {
     /// many slightly-different instruments, not phased clones).
     #[serde(default)]
     pub tune_cents: f32,
-    /// Per-PLAYER decorrelation seed for string sections. Each desk in an
+    /// Per-player decorrelation seed for string sections. Each desk in an
     /// ensemble loads the same patch with a distinct `seed_offset`, which
-    /// re-seeds every noise / micro-pitch / vibrato-wander stream so the
-    /// players are INDEPENDENT. Without it, stacked identical engines
-    /// phase-lock their partials and the section reads as a reed
-    /// (accordion/harmonica). 0 = the default single voice.
+    /// re-seeds every noise, micro-pitch and vibrato stream so the players
+    /// are independent and their partials do not phase-lock. 0 is the
+    /// default single voice.
     #[serde(default)]
     pub seed_offset: u32,
-    /// String-SECTION size, in PLAYERS (0 or 1 = solo). The engine renders
-    /// a small bounded pool of real decorrelated voices (physical timbre +
-    /// Ternstroem ~14 cent F0 scatter that fills the partial band) and, above
-    /// that pool, an O(1) decorrelating diffuser smooths toward the
-    /// large-N texture -- so the cost is INDEPENDENT of the size and a "100
-    /// violins" setting is feasible (see section.rs for the research basis).
+    /// String-section size, in players (0 or 1 is solo). The engine renders
+    /// a bounded pool of decorrelated physical voices (with the 14-cent F0
+    /// scatter Ternstroem measures) and, above that pool, a diffuser of
+    /// constant cost adds the rest of the section (section.rs).
     #[serde(default)]
     pub ensemble: f32,
 }
@@ -280,11 +277,10 @@ impl ArchetPatch {
         Self::default()
     }
 
-    /// Violin SECTION: one voiced source widened into a lush ensemble by the
-    /// built-in aperiodic detune-cluster (no reed/accordion phase-lock),
-    /// O(1) cost. Slightly slower attack + a touch more vibrato, like a
-    /// desk of players. Use a low polyphony + this preset instead of
-    /// stacking engines.
+    /// Violin section: one source widened into an ensemble by the detune
+    /// cluster, at constant cost, with a slightly slower attack and a touch
+    /// more vibrato, as a desk of players has. Use a low polyphony with
+    /// this preset rather than stacking engines.
     pub fn violin_ensemble() -> Self {
         Self {
             name: "Violin Ensemble".into(),
@@ -313,8 +309,8 @@ impl ArchetPatch {
             instrument: Instrument::Cello,
             bridge_hill_db: 6.0,
             bow_pos: 0.10,
-            // brighter source: a real cello's steady centroid (~1.7 kHz) needs the mid
-            // harmonics to survive the bridge loss; 0.34 was killing them (centroid ~0.95k).
+            // A low loss keeps the mid harmonics through the bridge: a cello's
+            // steady centroid sits near 1.7 kHz.
             loss: 0.16,
             vib_rate: 5.2,
             ..Self::default()
@@ -326,10 +322,10 @@ impl ArchetPatch {
         Self {
             name: "Double Bass".into(),
             instrument: Instrument::DoubleBass,
-            // A real arco bass is HARMONIC-RICH (weak fundamental, strong h2-h6),
-            // not dark -- the body radiates the harmonics, not the ~41 Hz fundamental.
-            bridge_hill_db: 10.0,  // strong upper-body presence -> the harmonics sing
-            bow_pos: 0.09,         // near the bridge -> many harmonics (the "growl")
+            // An arco bass is harmonic-rich: the body radiates the harmonics
+            // rather than the 41 Hz fundamental.
+            bridge_hill_db: 10.0,  // upper-body presence for the harmonics
+            bow_pos: 0.09,         // near the bridge: many harmonics
             loss: 0.22,            // bright: harmonics survive, not a clean sub
             vib_rate: 4.4,
             vib_depth: 7.0,

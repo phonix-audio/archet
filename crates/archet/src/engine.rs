@@ -36,13 +36,8 @@ pub enum ArchetCommand {
     SetPolyphony(u8),
     SetOutputLevel(f32),
     LoadPatch(Box<ArchetPatch>),
-    /// Set ONE named field of the patch.
-    ///
-    /// Added so the editor stops pushing a whole patch on every knob turn.
-    /// `LoadPatch` rebuilds the sympathetic open strings and walks the voice
-    /// pool to re-seed it; the two guards below (`inst != self.symp_inst` and
-    /// `seed_offset != self.applied_seed`) exist ONLY because a drag frame used
-    /// to arrive as a full patch. Naming the field is the actual fix.
+    /// Set one named field of the patch: what a knob turn sends, where
+    /// `LoadPatch` rebuilds the sympathetic strings and re-seeds the pool.
     SetParam { param: ArchetParam, value: f32 },
 }
 
@@ -76,15 +71,14 @@ pub struct ArchetEngine {
     // notes so runs leave a glowing halo. Rebuilt when the patch instrument changes.
     symp: SympStrings,
     symp_inst: usize,
-    /// Seed offset already applied to the voices. Re-seeding is idempotent only
-    /// in the sense that it always produces the SAME decorrelation for a given
-    /// offset, so doing it on every patch load perturbs a sounding ensemble
-    /// desk each time the editor pushes a patch (which it does per knob edit).
+    /// Seed offset already applied to the voices: re-seeding produces the
+    /// same decorrelation for a given offset, and is done only when the
+    /// offset changes, so a patch push does not perturb a sounding desk.
     applied_seed: u32,
     symp_level: f32,
     note_seq: u64, // monotonic note-on counter (oldest-voice release)
-    // string-SECTION diffuser: fills toward the large-N texture above the
-    // bounded real-voice pool (O(1), see section.rs). Bypassed when small.
+    // The section diffuser: the rest of the section above the bounded
+    // voice pool (section.rs). Bypassed when the section is small.
     section: crate::section::SectionDiffuser,
 }
 
@@ -155,10 +149,8 @@ impl ArchetEngine {
             return;
         }
 
-        // Two terms, and neither is the polyphony setting. That setting is how
-        // much overlap the player is ALLOWED, so keying the norm to it made the
-        // instrument quieter for raising a limit, and cut a desk for voices it
-        // could never light.
+        // Two terms, and neither is the polyphony setting, which is how much
+        // overlap the player is allowed, not how much sounds.
         //
         // The first term is a fixed headroom for the notes a player sounds at
         // once. It cannot follow the live count, which would make a desk pump
@@ -200,10 +192,9 @@ impl ArchetEngine {
         }
         self.symp.set_held(held);
         for frame_idx in 0..frames {
-            // Per-voice constant-power panning: in ENSEMBLE mode each unison
-            // player is seated at its own azimuth (set at note-on), so the
-            // section spreads across the stage. Non-ensemble voices have
-            // pan 0 -> both channels equal -> identical to the old mono dup.
+            // Per-voice constant-power panning: in ensemble mode each unison
+            // player is seated at its own azimuth, set at note-on. Other
+            // voices sit at pan 0, both channels equal.
             let mut mono = 0.0f32; // for the (global) sympathetic tail
             let mut sl = 0.0f32;
             let mut sr_ = 0.0f32;
@@ -226,7 +217,7 @@ impl ArchetEngine {
             // persistent ring: the open strings, sympathetic to whatever is
             // sounding. A pizzicato excites them as a bow does, so the tail
             // is one tail and does not branch on the stroke. The tail is a
-            // GLOBAL resonance: driven by the mono sum, added centered.
+            // global resonance: driven by the mono sum, added centered.
             let tail = self.symp.process(mono) * self.symp_level;
             // large-section fill: diffuse the (dry) voice field toward the
             // continuous many-player texture; the tail stays clean + centered.
@@ -310,10 +301,10 @@ impl ArchetEngine {
                     }
                 }
                 ArchetCommand::NoteOnLegato(note, vel) => {
-                    // Resurrect the loudest still-sounding voice (the bow that's
-                    // down, even if it was just note_off'd) and retune it -> the
-                    // slur continues. Robust: every note still gets a NoteOff, so
-                    // no voice can be stranded/held forever. No sounding voice ->
+                    // Retune the loudest still-sounding voice (the bow that is
+                    // down, even if just released), so the slur continues. Every
+                    // note still gets a NoteOff, so no voice is held forever. No
+                    // sounding voice:
                     // a fresh bow stroke.
                     let poly = (self.patch.polyphony as usize).min(MAX_VOICES);
                     let best = (0..poly)
@@ -348,7 +339,7 @@ impl ArchetEngine {
                 }
                 ArchetCommand::NoteOff(note) => {
                     self.held_keys.retain(|&x| x != note);
-                    // Release the OLDEST held CLUSTER of this pitch (one off pairs
+                    // Release the oldest held cluster of this pitch (one off pairs
                     // with one on). In ensemble mode a NoteOn spawns a unison
                     // cluster sharing one on_seq, so release every voice of that
                     // pitch at the oldest seq -- not just one (else the cluster's
@@ -424,9 +415,8 @@ impl ArchetEngine {
     /// loaded `.phx` reflects the saved patch (instrument, sympathetics, seed).
     pub fn load_patch(&mut self, p: ArchetPatch) {
         self.patch = p;
-        // Patches saved by the old 1..48 GUI knob (or hand-edited JSON)
-        // can carry a polyphony above the real voice pool - clamp so the
-        // GUI mirror and the engine agree.
+        // A saved patch can carry a polyphony above the voice pool; clamp
+        // so the editor's mirror and the engine agree.
         self.patch.polyphony = self.patch.polyphony.clamp(1, MAX_VOICES as u8);
         self.patch_dirty = true;
         // The sympathetic open strings follow the instrument, bowed or
@@ -437,12 +427,9 @@ impl ArchetEngine {
             self.symp = SympStrings::new(self.sample_rate, inst);
             self.symp_inst = inst;
         }
-        // per-desk decorrelation for string sections: re-seed all voices so
-        // this engine instance is independent of others.
-        // Only when the offset actually CHANGES. The editor pushes a whole
-        // patch on every knob edit (this engine exposes no per-parameter
-        // commands), so re-seeding unconditionally re-randomised a sounding
-        // ensemble desk on every drag tick.
+        // Per-desk decorrelation for string sections: re-seed all voices so
+        // this engine instance is independent of others, only when the
+        // offset changes.
         if self.patch.seed_offset != 0 && self.patch.seed_offset != self.applied_seed {
             let off = self.patch.seed_offset;
             for v in &mut self.voices { v.reseed(off); }
@@ -450,36 +437,30 @@ impl ArchetEngine {
         }
     }
 
-    /// ENSEMBLE / string-SECTION note-on (research model, Ternstroem JASA on
-    /// unison frequency scatter + Meyer on orchestral sections): one melodic
-    /// note becomes `count` REAL physical-model players, each with
-    /// - a STATIC F0 offset drawn ~ Gaussian, SD ~14 cents * depth (the
-    ///   scatter that diffuses each partial into a band -> no phase-lock,
-    ///   no reed); the spread scales with partial number automatically
-    ///   because it is a true pitch offset;
-    /// - independent bow-noise / micro-pitch / vibrato-rate seeds (already
-    ///   keyed per voice_idx) + a random vibrato phase per note = vibrato
-    ///   ASYNCHRONY, the second primary section cue;
+    /// A section's note-on (Ternstroem, JASA, on unison frequency scatter;
+    /// Meyer on orchestral sections): one note becomes `count` physical
+    /// players, each with
+    /// - a static F0 offset drawn about Gaussian, the scatter that diffuses
+    ///   each partial into a band;
+    /// - independent bow-noise, micro-pitch and vibrato-rate seeds (keyed
+    ///   per voice_idx) and a random vibrato phase per note;
     /// - its own stage azimuth.
     ///
-    /// Bounded cost (count voices, not N engines) -> real-time in the plugin.
+    /// The cost is the count of voices, not of engines.
     fn fire_unison(&mut self, note: u8, vel: u8, seq: u64) {
-        // `ensemble` is the SECTION SIZE in PLAYERS. Real physical voices
-        // are bounded at PHYS_CAP (the perceptual-saturation point,
-        // Ternstroem): enough independent instantaneous pitches to fill the
-        // scatter band. Requested sizes ABOVE the cap are realized by the
-        // O(1) section diffuser (engine output) -- cost stays flat, so a
-        // 100-violin setting is feasible.
+        // `ensemble` is the section size in players. Physical voices are
+        // bounded at PHYS_CAP, where the richness of independent sources
+        // saturates (Ternstroem); sizes above the cap are realized by the
+        // section diffuser at the engine output.
         // A plucked section needs fewer players to read as many: their
         // attacks are already spread in time, and each note must leave the
         // pool room for the chords a pizzicato part writes.
         let cap = if self.patch.pluck { PLUCK_CAP } else { PHYS_CAP };
         let size = self.patch.ensemble.max(2.0);
         let count: usize = (size.round() as usize).clamp(2, cap);
-        // measured inter-player F0 dispersion of a real section is 20-30 cents
-        // (Cuesta/Chandna unison analysis; Ternstroem) -- NOT the 14c tight-
-        // unison preference. 22c SD here + the per-voice slow drift gives the
-        // living, partials-crossing section instead of a fused fat unison.
+        // The measured inter-player F0 dispersion of a section is 20-30
+        // cents (Cuesta and Chandna, unison analysis; Ternstroem): 22 cents
+        // SD here, with the per-voice slow drift on top.
         let sd_cents = 22.0;
         let onset_max = (0.035 * self.sample_rate) as u32; // ~35 ms attack spread
         for k in 0..count {
@@ -495,8 +476,8 @@ impl ArchetEngine {
             let pan = if count > 1 {
                 ((k as f32 / (count - 1) as f32) * 2.0 - 1.0) * 0.7
             } else { 0.0 };
-            // ONSET ASYNCHRONY: player 0 lands on time; the rest 0..~28 ms late
-            // (bows never land together) -> spread attack, no fused transient.
+            // Onset asynchrony: player 0 lands on time; the rest up to about
+            // 28 ms late, so the section's attack is spread.
             let onset = if k == 0 { 0 } else { ((h >> 5) % onset_max) as usize };
             let idx = self.allocate_voice_idx(note);
             self.voices[idx].set_unison(det, pan, onset);
@@ -563,11 +544,9 @@ mod preset_sweep_tests {
             "no archet preset produced audible output - excitation path is broken");
     }
 
-    /// Byte-identity golden for the multi-voice render path. The live-RT WAVE 3
-    /// refactor reorders the per-voice / per-frame loops in process_audio for
-    /// cache locality; the output MUST stay bit-identical. This exercises
-    /// ensemble mode (many active voices + per-voice constant-power pan + the
-    /// global sympathetic tail on the mono sum), so the voice-summation order
+    /// Byte-identity golden for the multi-voice render path: ensemble mode
+    /// (many active voices, per-voice constant-power pan, the global
+    /// sympathetic tail on the mono sum), so the voice-summation order
     /// and the stereo split are covered. Update GOLDEN only for a deliberate,
     /// ear-verified sound change, never to paper over a drift.
     #[test]
@@ -946,13 +925,10 @@ mod profile {
         println!("wrote /tmp/archet_release_*.wav");
     }
 
-    /// A bowed phrase, to hear whether a long release blurs the line.
-    ///
-    /// The control now governs how the bow leaves, and the presets were voiced
-    /// when that fall was fixed and short, so the longest of them now holds a
-    /// note several times longer than it used to. Notes that overlap because
-    /// the previous one has not let go is the thing to listen for, and no
-    /// measurement settles it.
+    /// A bowed phrase at two release settings, to hear whether a long
+    /// release blurs the line: notes overlapping because the previous one
+    /// has not let go is the thing to listen for, and no measurement
+    /// settles it.
     ///   cargo test --lib engine::profile::bow_phrase -- --ignored --nocapture
     #[test]
     #[ignore = "diagnostic - run with --ignored"]
@@ -1854,11 +1830,11 @@ mod profile {
         println!("wrote /tmp/archet_phrase.wav (vels 35/60/85/110)");
     }
 
-    /// Diagnose articulation: a quick DETACHE note (does it sustain like a bow, or
-    /// peak-then-decay like a pizzicato?) and a slurred LEGATO pair (smooth?).
+    /// Diagnose articulation: a quick detache note (does it sustain like a
+    /// bow?) and a slurred legato pair (is it smooth?).
     ///   cargo test --release --lib engine::profile::detache_legato -- --ignored --nocapture
     #[test]
-    #[ignore = "diagnostic"]
+    #[ignore = "diagnostic - run with --ignored"]
     fn detache_legato() {
         let sr = 48_000.0_f32;
         let block = 256usize;
@@ -1884,8 +1860,8 @@ mod profile {
                 e
             }).collect()
         };
-        // DETACHE SEQUENCE: 4 fast notes via bow changes (continuous bow, no lift).
-        // The level should stay UP between notes (continuous), not dip to silence
+        // Detache sequence: 4 fast notes via bow changes (continuous bow, no
+        // lift). The level should stay up between notes, not dip to silence
         // (which would be a string of plucks).
         let det = render(vec![
             (0.0,  ArchetCommand::NoteOn(67, 95)),
@@ -1919,8 +1895,8 @@ mod profile {
         print!("  env(per 4 ms): "); for v in le.iter().take(80) { print!("{}", (v / lpk * 9.0) as u8); } println!();
         write_wav("/tmp/archet_legato.wav", &leg, sr);
 
-        // GESTURE ARCH: one short detache note (110 ms) must be an ARCH (peak in the
-        // middle 20-75% of the sounding span, NOT an instant-peak flat-top rectangle).
+        // Gesture arch: one short detache note (110 ms) must be an arch, its
+        // peak in the middle 20-75% of the sounding span.
         let arch_note = |t0: f32| -> Vec<f32> {
             render(vec![(0.05, ArchetCommand::NoteOn(71, 90 + (t0 * 10.0) as u8)),
                         (0.05 + 0.11, ArchetCommand::NoteOff(71))], 0.5)
@@ -1939,7 +1915,7 @@ mod profile {
                  peak_pos * 100.0, flat * 100.0);
         print!("  env(per 4 ms): "); for v in e1.iter().take(60) { print!("{}", (v / pk1 * 9.0) as u8); } println!();
 
-        // PER-NOTE VARIATION: two identical-pitch/velocity notes from the same engine
+        // Per-note variation: two identical-pitch/velocity notes from the same engine
         // must have different envelopes (correlation < 0.98).
         let two = render(vec![(0.05, ArchetCommand::NoteOn(71, 90)), (0.16, ArchetCommand::NoteOff(71)),
                               (0.30, ArchetCommand::NoteOn(71, 90)), (0.41, ArchetCommand::NoteOff(71))], 0.7);
@@ -1957,7 +1933,7 @@ mod profile {
         println!("VARIATION twin notes: envelope correlation = {:.3} (want < 0.98)",
                  cov / (vx * vy).sqrt().max(1e-9));
 
-        // LONG NOTE (1.5 s): must LIVE -- breathing sustain + swell, then shaped fall.
+        // Long note (1.5 s): a held sustain, then the shaped fall.
         let lng = render(vec![(0.05, ArchetCommand::NoteOn(67, 85)), (1.55, ArchetCommand::NoteOff(67))], 2.2);
         let ln = env(&lng);
         let lpk2 = ln.iter().cloned().fold(0.0, f32::max).max(1e-9);
@@ -1972,12 +1948,12 @@ mod profile {
     }
 
 
-    /// The worst case for a pizzicato: REPEATED 16ths on one pitch. Wants
+    /// The worst case for a pizzicato: repeated 16ths on one pitch. Wants
     /// every onset distinct (no choking from the predecessor's note-off) and
     /// no smear buildup.
     ///   cargo test --release --lib engine::profile::pluck_repeat -- --ignored --nocapture
     #[test]
-    #[ignore = "diagnostic"]
+    #[ignore = "diagnostic - run with --ignored"]
     fn pluck_repeat() {
         let sr = 48_000.0_f32;
         let block = 256usize;
@@ -2016,7 +1992,7 @@ mod profile {
     }
 
 
-    /// Full-range fit: render Archet for EACH instrument (violin/viola/cello/bass)
+    /// Full-range fit: render Archet for each instrument (violin/viola/cello/bass)
     /// across its real range -> /tmp/archetf_<inst>_<pitch>.wav, so each register
     /// can be measured for the body's published band targets.
     ///   cargo test --lib engine::profile::full_range_fit -- --ignored --nocapture
@@ -2049,8 +2025,7 @@ mod profile {
         println!("wrote /tmp/archetf_<inst>_<pitch>.wav for violin/viola/cello/contrabass");
     }
 
-    /// Isolate the Archet DOUBLE BASS at real low pitches, to hear whether it
-    /// behaves like a bowed string or a synth saw. -> /tmp/archet_bass_<pitch>.wav
+    /// The double bass alone at its low pitches -> /tmp/archet_bass_<pitch>.wav
     ///   cargo test --lib engine::profile::dump_bass -- --ignored --nocapture
     #[test]
     #[ignore = "diagnostic - run with --ignored"]
@@ -2172,9 +2147,8 @@ mod audit_tests {
         }
     }
 
-    /// Regression (audit v2): output_level was applied BOTH per voice and
-    /// in the engine's voice-sum norm, squaring the OUT knob. Halving the
-    /// level must now halve the output, not quarter it.
+    /// output_level is applied once, in the engine's voice-sum norm: halving
+    /// the level halves the output.
     #[test]
     fn output_level_is_applied_once() {
         let sr = 48_000.0f32;
@@ -2198,10 +2172,8 @@ mod audit_tests {
              ~0.25 means the level is applied twice again)");
     }
 
-    /// Regression (audit v2 MED): stealing an audibly-sounding voice used
-    /// to slam amp_env to 0 + reset the modal string in one sample (a
-    /// click). The steal must now fade the old sound over ~3 ms before the
-    /// fresh attack starts.
+    /// Stealing a sounding voice fades the old sound over about 3 ms before
+    /// the fresh attack starts.
     #[test]
     fn voice_steal_fades_instead_of_slamming() {
         let sr = 48_000.0f32;
@@ -2224,9 +2196,9 @@ mod audit_tests {
         let fade_window = &post[..144];              // the 3 ms declick fade
         let post_rms = (fade_window.iter().map(|s| s * s).sum::<f32>()
             / fade_window.len() as f32).sqrt();
-        // With the declick fade the 3 ms window still carries the old note
-        // (linear fade 1 -> 0, rms ~0.58x). A slammed steal renders
-        // near-silence there (fresh modal + amp_env restarting from 0).
+        // With the fade the 3 ms window still carries the old note (a
+        // linear fade 1 -> 0, rms about 0.58x); an instant steal would
+        // render near-silence there.
         assert!(post_rms > pre_rms * 0.25,
             "steal slammed the old sound to silence (pre rms {pre_rms}, fade-window rms {post_rms})");
 
@@ -2236,8 +2208,7 @@ mod audit_tests {
         assert!(peak > 1e-3, "the queued steal note never sounded (peak {peak})");
     }
 
-    /// LoadPatch must clamp polyphony to the real voice pool (the old GUI
-    /// allowed 1..48 with MAX_VOICES = 32).
+    /// LoadPatch clamps the polyphony to the voice pool.
     #[test]
     fn load_patch_clamps_polyphony() {
         let (mut eng, tx, _mr) = ArchetEngine::new_for_plugin(48_000.0);
@@ -2279,12 +2250,10 @@ mod audit_tests {
 ///
 /// Hashes a fixed render of six factory presets spanning every articulation the
 /// model has (solo arco, expressive arco, section cluster, full-range composite
-/// desk, pizzicato, harpsichord). Written so it compiles unchanged on both
-/// sides of the split: `super::super::patch` is `crate::patch` in the
-/// monolith and `crate::patch` in the extracted crate.
+/// desk, pizzicato).
 ///
 /// Archet is deterministic by construction: every noise stream is a private
-/// xorshift seeded from a CONSTANT (`ArchetString::rng = 0x1234_5678`,
+/// xorshift seeded from a constant (`ArchetString::rng = 0x1234_5678`,
 /// per-voice `ArchetVoice::new(sr, i)`, `SympStrings::new(sr, 0)`), the engine
 /// constructor spawns no thread and touches no lazily-warmed shared bank, and
 /// nothing reads the clock. So a plain render hashes stably.

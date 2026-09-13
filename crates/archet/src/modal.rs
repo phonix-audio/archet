@@ -1,21 +1,16 @@
-//! Modal bowed string -- Demoucron 2008 (PhD, IRCAM / KTH "On the control of
-//! virtual violins"), Chapter 2. This REPLACES the digital-waveguide string.
+//! The modal string: Demoucron, On the control of virtual violins, thesis,
+//! IRCAM / KTH, 2008, chapter 2.
 //!
-//! Why modal, not waveguide: the string is a bank of N independent damped
-//! harmonic oscillators (modes). Each mode has its OWN frequency (inharmonic via
-//! stiffness) AND its OWN decay rate r_n = B1 + B2*(n-1)^2 (Adrien's law,
-//! Eq. 2.13). That PER-PARTIAL decay control -- a long-ringing fundamental with
-//! fast-decaying highs -- is exactly the character of a real cello/bass and is
-//! precisely what a single waveguide loss filter cannot reproduce. Demoucron uses
-//! the SAME static hyperbolic friction curve as the STK/MSW models; the realism
-//! is in the modal string + true bridge-force output, not the friction.
-//!
-//! Per sample, each 2nd-order modal ODE is integrated by its EXACT analytical
-//! solution assuming the bow force is constant across the timestep (Eqs. 2.17-2.24
-//! -- this preserves the stick<->slip force discontinuity). The bow friction is
-//! the intersection of the hyperbolic curve with the string's numerical-impedance
-//! response line (Friedlander / McIntyre-Schumacher-Woodhouse, modal form,
-//! Eqs. 2.29-2.34). Output is the bridge FORCE (Eq. 2.35), not a displacement tap.
+//! The string is a bank of independent damped harmonic oscillators, each
+//! with its own frequency (inharmonic through stiffness) and its own decay
+//! rate: r_n = B1 + B2 (n-1)^2 (Adrien's law, Eq. 2.13), or a measured
+//! per-partial T60 law. Per sample, each second-order modal equation is
+//! integrated by its exact solution for a bow force constant across the
+//! step (Eqs. 2.17-2.24), which keeps the stick-slip force discontinuity.
+//! The bow friction is the intersection of the hyperbolic friction curve
+//! with the string's numerical-impedance response line (Friedlander;
+//! McIntyre, Schumacher and Woodhouse; Eqs. 2.29-2.34). The output is the
+//! bridge force (Eq. 2.35).
 
 pub const MAX_MODES: usize = 90;
 
@@ -60,13 +55,11 @@ pub struct ModalString {
     /// Samples processed and samples spent slipping since last read.
     pub steps: u32,
     pub slips: u32,
-    // -- string/fret unilateral CONTACT (slap bass, IRCAM Modalys style) ------
-    // A barrier placed at string fraction fret_beta. When the vibrating string
-    // penetrates it, a clamp force is applied across ALL modes (coupling them -> the
-    // buzzy, slightly inharmonic "growl" that colours the WHOLE slap note, not a gated
-    // attack frise). The barrier is RELATIVE to the string's own running swing
-    // (scale-independent: modal displacements are tiny, force-dependent units), and the
-    // force is NORMALIZED so fret_hard in [0,1] is a real clamp fraction (1 = rigid fret).
+    // Unilateral string-fret contact (slap): a barrier at string fraction
+    // fret_beta. When the string penetrates it, a clamp force is applied
+    // across all modes, coupling them. The barrier is relative to the
+    // string's own running swing, and the force is normalized so fret_hard
+    // in [0,1] is the clamp fraction, 1 being a rigid fret.
     fret_phi:  Vec<f64>,  // modal shape at the contact point
     fret_frac: f64,       // barrier at -fret_frac * swing (smaller -> deeper into the swing -> more growl)
     fret_hard: f64,       // clamp hardness 0..1
@@ -117,8 +110,7 @@ impl ModalString {
         // per-note count is still bounded by MAX_MODES.
         let fmax = 16000.0f32;
         let dpow = 2.0f32; // damping growth exponent r_n = b1 + b2*(n-1)^dpow
-        // Steep extra damping above mode `ncut` (radiation/air damping) -- suppresses
-        // the chaotic ringing of the high modes WITHOUT darkening the bright mid band.
+        // Steep extra damping above mode `ncut` (radiation and air damping).
         let b3 = 0.0f32;
         let ncut = 14.0f32;
         let nmax = ((fmax / f0).floor() as usize).min((0.45 * self.sr / f0).floor() as usize);
@@ -157,11 +149,11 @@ impl ModalString {
         self.b00 = if b00.abs() < 1e-12 { 1e-12 } else { b00 };
     }
 
-    /// Configure with an explicit per-partial T60 law. A plucked string's partial
-    /// decays are NON-monotonic -- a one-pole trend with a RIPPLE so neighbouring
-    /// partials differ and the 2nd partial often outlives the 1st, which is the
-    /// two polarisations beating rather than anything about one instrument
-    /// (Valimaki 2004 measures it; Woodhouse 2004 derives it).
+    /// Configure with an explicit per-partial T60 law. A plucked string's
+    /// partial decays are not monotonic in the partial number: neighbouring
+    /// partials differ and the second often outlives the first, the two
+    /// polarisations beating (Valimaki 2004 measures it; Woodhouse 2004
+    /// derives it).
     /// `t60(k)` returns the decay time (s) of partial k (1-based).
     pub fn set_voice_t60(&mut self, f0: f32, stiff: f32, beta: f32,
                          t60: &dyn Fn(usize) -> f32) {
@@ -201,13 +193,13 @@ impl ModalString {
         self.b00 = if b00.abs() < 1e-12 { 1e-12 } else { b00 };
     }
 
-    /// Numerical impedance C01 = 1/b00 (the modal analogue of 2*Zc). The bow force
-    /// must be scaled to this for the string to STICK (clean Helmholtz).
+    /// Numerical impedance C01 = 1/b00, the modal analogue of 2 Zc; the bow
+    /// force is scaled to it.
     pub fn impedance(&self) -> f32 {
         (1.0 / self.b00) as f32
     }
 
-    /// PLUCK: one-shot force injection at the excitation point (beta). One
+    /// A one-shot force injection at the excitation point (beta). One
     /// application of the per-mode force add, then a free linear ring-down with
     /// the per-partial decay.
     pub fn excite(&mut self, force: f32) {
@@ -218,19 +210,12 @@ impl ModalString {
         }
     }
 
-    /// PLUCK as a RELEASE, which is what a pluck is: the string is pulled into
-    /// a triangular shape at `beta` and let go. Every mode therefore starts at
-    /// its own DISPLACEMENT and at ZERO velocity. Expanding that triangle on
-    /// the mode basis gives a_n proportional to sin(n pi beta) / n^2, with
-    /// a_n-dot zero, and `phi0` already carries the sin(n pi beta) for this
-    /// beta, so the
-    /// remaining constant folds into `amp`, calibrated by the caller.
-    ///
-    /// The 1/n^2 is precisely what injecting a FORCE does not give. Measured
-    /// against the release, a force impulse leaves the partials some 34 dB too
-    /// loud by the sixteenth (and the gap keeps widening), and starts the
-    /// fundamental with a modal velocity ~52x the one its own displacement
-    /// implies: the string is struck rather than let go.
+    /// The pluck as a release: the string is pulled into a triangular shape
+    /// at `beta` and let go, so every mode starts at its own displacement
+    /// and at zero velocity. Expanding that triangle on the mode basis gives
+    /// a_n proportional to sin(n pi beta) / n^2 with a_n-dot zero; `phi0`
+    /// carries the sin(n pi beta) for this beta and the remaining constant
+    /// folds into `amp`, calibrated by the caller.
     ///
     /// `fc_hz` is the fingertip's compliance, rounding the corner of the shape.
     pub fn release(&mut self, amp: f32, fc_hz: f32, f0: f32) {
@@ -238,12 +223,12 @@ impl ModalString {
         // own fundamental, and a floor here would quietly undo it.
         let fc = fc_hz.max(1.0) as f64;
         let f0d = f0 as f64;
-        // `amp` arrives on the scale a FORCE used, because that is what the
-        // caller's velocity mapping is voiced in. A force reached the modal
-        // displacement through `x3`, a displacement does not, so carry that
-        // factor here. Take it from `x3[0]` rather than from any formula: it is
-        // the integrator's own coefficient, right at every pitch. Once, on the
-        // fundamental -- applying it per mode would bend the shape to 1/k^4.
+        // `amp` is on the scale of a force, which the caller's velocity
+        // mapping is voiced in. A force reaches the modal displacement
+        // through `x3`, a displacement does not, so that factor is carried
+        // here, taken from `x3[0]`, the integrator's own coefficient at this
+        // pitch. Once, on the fundamental: per mode it would bend the shape
+        // to 1/k^4.
         let a0 = amp as f64 * self.x3[0];
         for i in 0..self.n {
             let k = (i + 1) as f64;
@@ -255,9 +240,9 @@ impl ModalString {
     }
 
     
-    /// Partially damp the existing modal energy (for legato retune): the old pitch's
-    /// modal phases don't form the NEW pitch's Helmholtz corner, so they beat ("weird"
-    /// slur) until the bow re-locks. Knocking the stale energy down lets the (still
+    /// Partially damp the existing modal energy (for a legato retune): the
+    /// previous pitch's modal phases do not form the new pitch's Helmholtz
+    /// corner and beat until the bow re-locks. Damping them lets the (still
     /// bowing) string establish the new corner faster, without a silent gap.
     pub fn soften(&mut self, factor: f32) {
         let f = factor as f64;
@@ -297,17 +282,18 @@ impl ModalString {
 
     pub fn clear_fret(&mut self) { self.fret_on = false; self.fret_hard = 0.0; }
 
-    /// The bridge force the string would output right now (no state advance). Used to
-    /// NORMALIZE a pluck across pitch: low notes have many in-phase modes -> a far larger
-    /// attack sum; scaling the post-excite state by target/bridge_now() makes the attack
-    /// level pitch-independent (and clip-free) without touching the per-partial decay.
+    /// The bridge force the string would output right now, with no state
+    /// advance. Normalizes a pluck across pitch: low notes have many in-phase
+    /// modes and a far larger attack sum; scaling the excited state by
+    /// target/bridge_now() makes the attack level pitch-independent without
+    /// touching the per-partial decay.
     pub fn bridge_now(&self) -> f32 {
         let mut b = 0.0f64;
         for i in 0..self.n { b += self.a[i] * self.wbridge[i]; }
         b as f32
     }
 
-    /// One sample of a freely-ringing (plucked) string WITH the string/fret contact.
+    /// One sample of a freely ringing (plucked) string with the string-fret contact.
     /// No bow. Returns the bridge force. When the displacement at the fret penetrates
     /// the (amplitude-relative) barrier, a normalized clamp force pushes it back across
     /// all modes -> the buzzy, slightly inharmonic slap growl that pervades the whole
@@ -368,7 +354,8 @@ impl ModalString {
         let mut v0h = 0.0f64;
         let n = self.n;
         // Bind [..n] slices so the per-sample loop drops bounds checks and
-        // autovectorizes. SAME ops in the SAME order -> bit-identical output.
+        // autovectorizes; the same operations in the same order keep the
+        // output bit-identical.
         {
             let a = &mut self.a[..n];
             let adot = &mut self.adot[..n];
@@ -481,8 +468,8 @@ mod tests {
     fn render(f0: f32, b1: f32, b2: f32, stiff: f32, beta: f32, vb: f32, fb: f32,
               secs: f32) -> (Vec<f32>, f32) {
         let sr = 48000.0;
-        // OVERSAMPLE: run the string at os*sr so the slip time is finely resolved
-        // (sample-quantized slip jitter decoheres the short-period high modes).
+        // Oversampling factor: the string runs at os*sr so the slip time is
+        // finely resolved.
         let os: usize = 1;
         let mut s = ModalString::new(sr * os as f32);
         s.set_voice(f0, b1, b2, stiff, beta);
@@ -591,17 +578,15 @@ mod tests {
         pm / fm
     }
 
-    /// De-risk: SWEEP bow force (relative to the numerical impedance) to find the
-    /// clean-Helmholtz window. The bug was bow force >> too small to ever STICK.
+    /// Sweep the bow force, relative to the numerical impedance, and the
+    /// damping law, and print the centroid and noise of the raw string.
     ///   cargo test --release --lib modal::tests::derisk -- --ignored --nocapture
     #[test]
     #[ignore]
     fn derisk() {
-        // bow force = 1.0 * C01 * vb (clean Helmholtz); SWEEP B2 to find the source
-        // brightness. Target RAW (pre-body) centroid ~ desired radiated: cello ~1.7k,
-        // bass ~0.8k (the body then imposes formants without a big tilt).
-        // LOW B2 (bright mid band) + sweep ARCHET_B3 (high-mode damping) to kill the
-        // chaotic high-mode ringing without darkening. beta moderate.
+        // Bow force = 1.0 * C01 * vb; B2 sweeps the source brightness. The raw
+        // (pre-body) centroid to aim at is the radiated one: cello about
+        // 1.7 kHz, bass about 0.8 kHz.
         let cases = [("cello_C3", 130.8, 1.5, 0.05, 8.0e-4, 0.07, 0.20),
                      ("bass_A1", 55.0, 1.0, 0.06, 1.2e-3, 0.07, 0.18)];
         for (lbl, f0, b1, b2, stiff, beta, vb) in cases {
