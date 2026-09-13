@@ -318,6 +318,12 @@ impl ArchetVoice {
     /// delay (samples) before a note-on (the section's scatter and bow
     /// asynchrony; see the engine's fire_unison). Persists across note_on;
     /// reset to (0, 0, 0) for ordinary notes.
+    /// This player's seat detune, for the tests that watch the seats.
+    #[cfg(test)]
+    pub(crate) fn unison_det(&self) -> f32 {
+        self.unison_det
+    }
+
     pub fn set_unison(&mut self, det_cents: f32, pan: f32, onset_delay: usize) {
         self.unison_det = det_cents;
         self.unison_pan = pan;

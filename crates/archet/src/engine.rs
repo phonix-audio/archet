@@ -25,6 +25,17 @@ const SECTION_GAIN_CAP_DB: f32 = 3.0;
 /// Physical voices a plucked section lights per note.
 const PLUCK_CAP: usize = 4;
 
+/// A 32-bit finaliser (MurmurHash3's), so every bit of a small seat
+/// number reaches every bit drawn from it.
+fn mix32(mut h: u32) -> u32 {
+    h ^= h >> 16;
+    h = h.wrapping_mul(0x85eb_ca6b);
+    h ^= h >> 13;
+    h = h.wrapping_mul(0xc2b2_ae35);
+    h ^= h >> 16;
+    h
+}
+
 #[derive(Debug, Clone)]
 pub enum ArchetCommand {
     NoteOn(u8, u8),
@@ -134,7 +145,7 @@ impl ArchetEngine {
         let frames = output.len() / channels.max(1);
         self.process_commands();
 
-        let poly = (self.patch.polyphony as usize).min(MAX_VOICES);
+        let poly = self.pool();
         let any_active = self.voices[..poly].iter().any(|v| v.is_active());
 
         // keep rendering while the sympathetic open strings still ring (the
@@ -161,11 +172,7 @@ impl ArchetEngine {
         // voices, they sum incoherently, and dividing by the root of their
         // number puts a section note back beside a solo one.
         const CHORD: f32 = 8.0;
-        let lit = if self.patch.ensemble >= 1.5 {
-            (self.patch.ensemble.max(2.0).round() as usize).clamp(2, PHYS_CAP)
-        } else {
-            1
-        };
+        let lit = self.voices_per_note();
         // A section larger than the voices that render it is louder by the
         // incoherent sum of its players, within the headroom.
         let asked = self.patch.ensemble.round().max(1.0);
@@ -273,7 +280,7 @@ impl ArchetEngine {
                     if self.patch.pluck {
                         let inst = ArchetVoice::inst_for(note, &self.patch);
                         let (string, _, _) = ArchetVoice::string_for(inst, note);
-                        let poly = (self.patch.polyphony as usize).min(MAX_VOICES);
+                        let poly = self.pool();
                         for v in self.voices[..poly].iter_mut() {
                             if let Some((i, s)) = v.on_string() {
                                 if v.is_active() && i == inst && (s == string || v.is_releasing()) {
@@ -297,7 +304,7 @@ impl ArchetEngine {
                     // note still gets a NoteOff, so no voice is held forever. No
                     // sounding voice:
                     // a fresh bow stroke.
-                    let poly = (self.patch.polyphony as usize).min(MAX_VOICES);
+                    let poly = self.pool();
                     let best = (0..poly)
                         .filter(|&i| self.voices[i].is_active() && self.voices[i].level() > 1e-4)
                         .max_by(|&a, &b| self.voices[a].level().partial_cmp(&self.voices[b].level()).unwrap());
@@ -314,7 +321,7 @@ impl ArchetEngine {
                 ArchetCommand::BowChange(note, vel) => {
                     // Detache: reverse the bow on the still-bowing voice (no lift -> no
                     // pluck). Same voice-selection as legato; fresh stroke if none down.
-                    let poly = (self.patch.polyphony as usize).min(MAX_VOICES);
+                    let poly = self.pool();
                     let best = (0..poly)
                         .filter(|&i| self.voices[i].is_active() && self.voices[i].level() > 1e-4)
                         .max_by(|&a, &b| self.voices[a].level().partial_cmp(&self.voices[b].level()).unwrap());
@@ -453,17 +460,23 @@ impl ArchetEngine {
         // SD here, with the per-voice slow drift on top.
         let sd_cents = 22.0;
         let onset_max = (0.035 * self.sample_rate) as u32; // ~35 ms attack spread
-        for k in 0..count {
-            // A seat's intonation is the player's: drawn from the seat and
-            // the desk's seed, the same at every note, as a sum of three
-            // uniforms for a bell-shaped spread.
-            let seat = (k as u32)
-                .wrapping_mul(40503)
-                .wrapping_add(self.patch.seed_offset.wrapping_mul(2654435761))
-                ^ 0x9E37_79B9;
+        // A seat's intonation is the player's: drawn from the seat and the
+        // desk's seed, the same at every note, as a sum of three uniforms
+        // for a bell-shaped spread; and the section tunes to one A, so the
+        // seats' offsets are centred on it.
+        let mut g = [0.0f32; PHYS_CAP];
+        for (k, gk) in g.iter_mut().enumerate().take(count) {
+            let seat = mix32(
+                (k as u32)
+                    .wrapping_mul(40503)
+                    .wrapping_add(self.patch.seed_offset.wrapping_mul(2654435761)),
+            );
             let u = |sh: u32| ((seat >> sh) & 0x3ff) as f32 / 1023.0;
-            let g = (u(0) + u(10) + u(20)) / 3.0 * 2.0 - 1.0;
-            let det = g * sd_cents * 1.7; // 1.7: map the triangular-ish range to ~SD
+            *gk = (u(0) + u(10) + u(20)) / 3.0 * 2.0 - 1.0;
+        }
+        let mean = g[..count].iter().sum::<f32>() / count as f32;
+        for (k, gk) in g.iter().enumerate().take(count) {
+            let det = (gk - mean) * sd_cents * 1.7; // 1.7: map the triangular-ish range to ~SD
             // seat the players across the desk: -0.7 .. +0.7
             let pan = if count > 1 {
                 ((k as f32 / (count - 1) as f32) * 2.0 - 1.0) * 0.7
@@ -482,15 +495,42 @@ impl ArchetEngine {
         }
     }
 
+    /// Physical voices one note lights on this patch.
+    fn voices_per_note(&self) -> usize {
+        if self.patch.ensemble >= 1.5 {
+            let cap = if self.patch.pluck { PLUCK_CAP } else { PHYS_CAP };
+            (self.patch.ensemble.max(2.0).round() as usize).clamp(2, cap)
+        } else {
+            1
+        }
+    }
+
+    /// The voices in use: the polyphony counts notes, and each note lights
+    /// its players, up to the pool.
+    fn pool(&self) -> usize {
+        (self.patch.polyphony as usize)
+            .saturating_mul(self.voices_per_note())
+            .clamp(1, MAX_VOICES)
+    }
+
+    /// A voice for a new note: a free one, else the oldest of those already
+    /// lifting, else the oldest sounding. Never a fixed index: a full pool
+    /// would pile every player of a new note onto one voice.
     fn allocate_voice_idx(&mut self, note: u8) -> usize {
-        let poly = (self.patch.polyphony as usize).min(MAX_VOICES);
-        if let Some(i) = self.voices[..poly].iter().position(|v| !v.is_active()) {
+        let pool = self.pool();
+        if let Some(i) = self.voices[..pool].iter().position(|v| !v.is_active()) {
             return i;
         }
-        if let Some(i) = self.voices[..poly].iter().position(|v| v.note == Some(note)) {
-            return i;
-        }
-        0
+        let _ = note;
+        let oldest = |releasing: bool| {
+            self.voices[..pool]
+                .iter()
+                .enumerate()
+                .filter(|(_, v)| v.is_releasing() == releasing)
+                .min_by_key(|(_, v)| v.on_seq)
+                .map(|(i, _)| i)
+        };
+        oldest(true).or_else(|| oldest(false)).unwrap_or(0)
     }
 }
 
@@ -568,8 +608,77 @@ mod preset_sweep_tests {
             left.extend(buf.iter().step_by(2));
         }
         let h = crate::fingerprint::of(&left);
-        const GOLDEN: u64 = 0x4b0e15ec84eb54f5; // the ensemble render, note-offs included
+        const GOLDEN: u64 = 0x0463cb5a6c7359c7; // the ensemble render, note-offs included
         assert_eq!(h, GOLDEN, "Archet ensemble render drifted from golden (hash {h:#018x})");
+    }
+}
+
+#[cfg(test)]
+mod section_pool {
+    use super::*;
+
+    /// A section's polyphony counts notes: four notes on a section of
+    /// eight light thirty-two voices, and a fifth note takes the oldest
+    /// note's voices, not one voice for all its players.
+    #[test]
+    fn a_section_chord_keeps_every_player() {
+        let sr = 48_000.0_f32;
+        let (mut eng, tx, _mr) = ArchetEngine::new_for_plugin(sr);
+        let mut p = crate::patch::ArchetPatch::violin();
+        p.ensemble = 8.0;
+        p.polyphony = 4;
+        tx.send(ArchetCommand::LoadPatch(Box::new(p))).unwrap();
+        let mut buf = vec![0.0f32; 512];
+        eng.process_audio(&mut buf, 2);
+        for n in [60u8, 64, 67, 71] {
+            tx.send(ArchetCommand::NoteOn(n, 90)).unwrap();
+            eng.process_audio(&mut buf, 2);
+        }
+        let lit = |eng: &ArchetEngine, note: u8| eng.voices.iter().filter(|v| v.is_active() && v.note == Some(note)).count();
+        assert_eq!(eng.voices.iter().filter(|v| v.is_active()).count(), 32);
+        for n in [60u8, 64, 67, 71] {
+            assert_eq!(lit(&eng, n), 8, "note {n}");
+        }
+        tx.send(ArchetCommand::NoteOn(74, 90)).unwrap();
+        eng.process_audio(&mut buf, 2);
+        assert_eq!(lit(&eng, 74), 8, "the fifth note lights all its players");
+        assert_eq!(lit(&eng, 60), 0, "the oldest note gave way");
+        assert_eq!(lit(&eng, 64), 8);
+    }
+
+    /// The seats keep their intonation from one note to the next, centred
+    /// on the section's A.
+    #[test]
+    fn a_section_keeps_its_seats_from_note_to_note() {
+        let sr = 48_000.0_f32;
+        let (mut eng, tx, _mr) = ArchetEngine::new_for_plugin(sr);
+        let mut p = crate::patch::ArchetPatch::violin();
+        p.ensemble = 8.0;
+        p.polyphony = 4;
+        tx.send(ArchetCommand::LoadPatch(Box::new(p))).unwrap();
+        let mut buf = vec![0.0f32; 512];
+        eng.process_audio(&mut buf, 2);
+        let seats = |eng: &ArchetEngine, note: u8| -> Vec<i32> {
+            let mut d: Vec<i32> = eng
+                .voices
+                .iter()
+                .filter(|v| v.is_active() && v.note == Some(note))
+                .map(|v| (v.unison_det() * 10.0).round() as i32)
+                .collect();
+            d.sort_unstable();
+            d
+        };
+        tx.send(ArchetCommand::NoteOn(60, 90)).unwrap();
+        eng.process_audio(&mut buf, 2);
+        let first = seats(&eng, 60);
+        tx.send(ArchetCommand::NoteOn(67, 90)).unwrap();
+        eng.process_audio(&mut buf, 2);
+        let second = seats(&eng, 67);
+        assert_eq!(first.len(), 8);
+        assert_eq!(first, second, "the same eight seats at every note");
+        let mean = first.iter().sum::<i32>() as f32 / 80.0;
+        assert!(mean.abs() < 0.5, "centred on the section's A, mean {mean} cents");
+        assert!(first.iter().any(|&d| d.abs() > 50), "spread by more than a few cents");
     }
 }
 
@@ -2598,6 +2707,6 @@ mod golden_audio {
         }
         let h = crate::fingerprint::of(&left);
         eprintln!("GOLDEN = {h:#018x}");
-        assert_eq!(h, 0xf0f90fe71d223ed9, "the engine's rendered audio changed");
+        assert_eq!(h, 0x3452568fbd416118, "the engine's rendered audio changed");
     }
 }

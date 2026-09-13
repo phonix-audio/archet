@@ -46,7 +46,9 @@ when the waveguide went: `bow_pos` is the modal string's bow point (and,
 plucked, the finger's), `loss` scales the string's loss law about its
 calibrated value, and `vel_sens` is the share of the dynamic range the
 velocity commands. The factory presets carry the values the model was
-calibrated at.
+calibrated at. And `polyphony` counts notes, not voices: each note of a
+section lights its players, and the pool of thirty-two voices is the
+limit; a saved value above what the pool can hold means the pool.
 
 ## The chain a patch carries
 
