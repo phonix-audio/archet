@@ -139,6 +139,7 @@ dependencies = [
  "archet",
  "archet-ui",
  "egui",
+ "libc",
  "nice-plug",
  "nice-plug-egui",
  "phonix-plugin",

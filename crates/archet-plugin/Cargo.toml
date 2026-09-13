@@ -11,6 +11,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 nice-plug      = { workspace = true }
+libc           = "0.2"
 nice-plug-egui = { workspace = true }
 archet          = { workspace = true }
 archet-ui       = { workspace = true }

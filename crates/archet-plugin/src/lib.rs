@@ -38,8 +38,34 @@ pub struct ArchetPlugin {
 
 const INIT_SIG_LEN: usize = 19;
 
+/// Keeps this library mapped for the life of the process.
+///
+/// The plugin framework installs a global logger and a panic hook at
+/// entry, both pointing into this library, and neither can be removed. A
+/// host that unloads the library afterwards leaves them dangling, and the
+/// next log call crashes the process. Opening the library once more with
+/// RTLD_NODELETE tells the loader never to unmap it.
+#[cfg(unix)]
+fn pin_library() {
+    use std::sync::Once;
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| unsafe {
+        let mut info: libc::Dl_info = std::mem::zeroed();
+        let here = pin_library as *const () as *const libc::c_void;
+        if libc::dladdr(here, &mut info) != 0 && !info.dli_fname.is_null() {
+            // RTLD_NOLOAD promotes the flags of the library already loaded.
+            let flags = libc::RTLD_NOW | libc::RTLD_NODELETE | libc::RTLD_NOLOAD;
+            let _never_closed = libc::dlopen(info.dli_fname, flags);
+        }
+    });
+}
+
+#[cfg(not(unix))]
+fn pin_library() {}
+
 impl Default for ArchetPlugin {
     fn default() -> Self {
+        pin_library();
         let presets = ArchetPatch::factory_presets();
         let preset_count = presets.len();
 
