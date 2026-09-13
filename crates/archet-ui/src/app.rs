@@ -384,7 +384,7 @@ impl ArchetApp {
         cui.vertical_centered(|ui| {
             widgets::knob_fmt(ui, &mut n, label, &text, size, tint);
         });
-        ((n - old).abs() > 1e-6).then(|| lo + n * span)
+        ((n - old).abs() > 1e-6).then_some(lo + n * span)
     }
 }
 
@@ -442,11 +442,13 @@ mod tests {
         }
     }
 
+    // The panel and the keyboard fit the window, with room for the chrome.
+    const _: () = assert!(PANEL_H + KEYBOARD_H < H);
+    const _: () = assert!(H - PANEL_H - KEYBOARD_H >= 40.0);
+
     /// The window is exactly the chrome, the panel and the keyboard.
     #[test]
     fn the_window_holds_what_it_draws() {
-        assert!(PANEL_H + KEYBOARD_H < H, "the panel and the keyboard do not fit {H}");
-        assert!(H - PANEL_H - KEYBOARD_H >= 40.0, "no room left for the chrome");
         assert_eq!((W, H), (1160.0, 770.0));
     }
 
@@ -472,9 +474,7 @@ mod tests {
         let (tx, _rx) = mpsc::channel();
         let (mut w, r) = meter_channel::<ArchetMeterState>();
         let mut app = ArchetApp::new(tx, r);
-        let mut engine_patch = ArchetPatch::default();
-        engine_patch.name = "From the engine".into();
-        engine_patch.bow_force = 0.77;
+        let engine_patch = ArchetPatch { name: "From the engine".into(), bow_force: 0.77, ..Default::default() };
         {
             let s = w.edit();
             s.patch_snapshot = Some(engine_patch);

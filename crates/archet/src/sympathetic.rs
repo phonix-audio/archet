@@ -24,7 +24,7 @@ impl Comb {
         let len = delay.ceil() as usize + 4;
         let fb = 10f32.powf(-3.0 * delay / (sr * t60));
         // The same order as the plucked voice's own stop under a finger.
-        let fb_held = 10f32.powf(-1.0 * delay / (sr * 0.004));
+        let fb_held = 10f32.powf(-delay / (sr * 0.004));
         Self { buf: vec![0.0; len], pos: 0, delay, fb, fb_held, held: false, lp: 0.0 }
     }
 

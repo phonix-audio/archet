@@ -451,14 +451,15 @@ impl ArchetEngine {
     /// ENSEMBLE / string-SECTION note-on (research model, Ternstroem JASA on
     /// unison frequency scatter + Meyer on orchestral sections): one melodic
     /// note becomes `count` REAL physical-model players, each with
-    ///  - a STATIC F0 offset drawn ~ Gaussian, SD ~14 cents * depth (the
-    ///    scatter that diffuses each partial into a band -> no phase-lock,
-    ///    no reed); the spread scales with partial number automatically
-    ///    because it is a true pitch offset;
-    ///  - independent bow-noise / micro-pitch / vibrato-rate seeds (already
-    ///    keyed per voice_idx) + a random vibrato phase per note = vibrato
-    ///    ASYNCHRONY, the second primary section cue;
-    ///  - its own stage azimuth.
+    /// - a STATIC F0 offset drawn ~ Gaussian, SD ~14 cents * depth (the
+    ///   scatter that diffuses each partial into a band -> no phase-lock,
+    ///   no reed); the spread scales with partial number automatically
+    ///   because it is a true pitch offset;
+    /// - independent bow-noise / micro-pitch / vibrato-rate seeds (already
+    ///   keyed per voice_idx) + a random vibrato phase per note = vibrato
+    ///   ASYNCHRONY, the second primary section cue;
+    /// - its own stage azimuth.
+    ///
     /// Bounded cost (count voices, not N engines) -> real-time in the plugin.
     fn fire_unison(&mut self, note: u8, vel: u8, seq: u64) {
         // `ensemble` is the SECTION SIZE in PLAYERS. Real physical voices
@@ -1189,7 +1190,9 @@ mod profile {
             [&[41], &[34], &[38], &[36]],
         ];
         const CB_16: [&[u8]; 4] = [&[45], &[38], &[45], &[33]];
-        let desks: [(&[[&[u8]; 4]; 8], &[&[u8]; 4]); 5] = [
+        type Bars = [[&'static [u8]; 4]; 8];
+        type Bar = [&'static [u8]; 4];
+        let desks: [(&Bars, &Bar); 5] = [
             (&VLN1, &VLN1_16),
             (&VLN2, &VLN2_16),
             (&VLA, &VLA_16),
@@ -1415,7 +1418,7 @@ mod profile {
         // itself and the next mark.
         let mut dynamic = vec![48i32; bars + 2];
         let mut current = 48;
-        for bar in 1..=bars {
+        for (bar, d) in dynamic.iter_mut().enumerate().take(bars + 1).skip(1) {
             for &(b, m) in &marks {
                 if b == bar {
                     if let Some(l) = level_of(m) {
@@ -1423,7 +1426,7 @@ mod profile {
                     }
                 }
             }
-            dynamic[bar] = current;
+            *d = current;
         }
         let level = dynamic.clone();
         let mut accent = vec![false; bars + 2];
@@ -1599,7 +1602,8 @@ mod profile {
         // recordings that are played without one, at the preset's bow force
         // and at multiples of it.
         let mut runs = vec![(32u8, true, 1.0f32), (80, true, 1.0), (112, true, 1.0)];
-        for scale in [1.0f32] {
+        {
+            let scale = 1.0f32;
             runs.push((80, false, scale));
         }
         for (vel, vib, force_scale) in runs {
@@ -2014,7 +2018,8 @@ mod profile {
     #[ignore = "diagnostic - run with --ignored"]
     fn full_range_fit() {
         let sr = 48_000.0_f32;
-        let specs: [(&str, fn() -> ArchetPatch, &[u8]); 4] = [
+        type Spec = (&'static str, fn() -> ArchetPatch, &'static [u8]);
+        let specs: [Spec; 4] = [
             ("violin", ArchetPatch::violin, &[55, 62, 69, 76, 81, 88, 93]),
             ("viola", ArchetPatch::viola, &[48, 55, 62, 69, 76, 81]),
             ("cello", ArchetPatch::cello, &[36, 43, 48, 55, 60, 67]),
@@ -2245,8 +2250,7 @@ mod audit_tests {
     #[test]
     fn repeated_patch_pushes_do_not_reseed_an_unchanged_ensemble_desk() {
         let (mut eng, tx, _mr) = ArchetEngine::new_for_plugin(48_000.0);
-        let mut p = crate::patch::ArchetPatch::default();
-        p.seed_offset = 7;
+        let mut p = crate::patch::ArchetPatch { seed_offset: 7, ..Default::default() };
         let _ = tx.send(ArchetCommand::LoadPatch(Box::new(p.clone())));
         let mut buf = vec![0.0f32; 128];
         eng.process_audio(&mut buf, 2);

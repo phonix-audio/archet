@@ -348,7 +348,7 @@ impl Plugin for ArchetPlugin {
 
     const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] = &[AudioIOLayout {
         main_input_channels:  None,
-        main_output_channels: Some(unsafe { std::num::NonZeroU32::new_unchecked(2) }),
+        main_output_channels: Some(std::num::NonZeroU32::new(2).unwrap()),
         aux_input_ports:      &[],
         aux_output_ports:     &[],
         names:                PortNames::const_default(),
@@ -450,7 +450,7 @@ impl Plugin for ArchetPlugin {
         // -- Init mode: rebuild + LoadPatch only when a param changed --
         if current_preset == 0 {
             let sig = self.params.init_sig();
-            let changed = self.last_init_sig.map_or(true, |prev| {
+            let changed = self.last_init_sig.is_none_or(|prev| {
                 prev.iter().zip(sig.iter()).any(|(a, b)| (a - b).abs() > 1e-6)
             });
             if changed {

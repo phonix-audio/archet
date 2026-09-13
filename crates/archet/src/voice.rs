@@ -79,10 +79,10 @@ impl Pink {
         // Per-band one-pole lowpass coefficients (slower -> stronger / lower freq).
         const A: [f32; 5] = [0.0008, 0.004, 0.02, 0.09, 0.35];
         let mut sum = 0.0;
-        for i in 0..5 {
+        for (i, (s, a)) in self.s.iter_mut().zip(A.iter()).enumerate() {
             let w = self.n.next();
-            self.s[i] += (w - self.s[i]) * A[i];
-            sum += self.s[i] * (1.0 - i as f32 * 0.12);
+            *s += (w - *s) * a;
+            sum += *s * (1.0 - i as f32 * 0.12);
         }
         self.out = (sum * 0.55).clamp(-1.0, 1.0);
         self.out
@@ -1186,7 +1186,7 @@ impl ArchetVoice {
             // (recomputing ~90 modes of sin/cos/exp is the dominant CPU cost; ~187 Hz is
             // ample for a ~6 Hz vibrato).
             self.modal_recalc = self.modal_recalc.wrapping_add(1);
-            if !self.releasing && (gliding || self.modal_recalc % 8 == 0) {
+            if !self.releasing && (gliding || self.modal_recalc.is_multiple_of(8)) {
                 let (b1, b2, stiff, beta) = Self::modal_params(self.inst_idx, self.freq_hz);
                 self.modal.set_voice(self.freq_hz * self.bend, b1, b2, stiff, beta);
             }

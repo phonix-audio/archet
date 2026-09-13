@@ -8,7 +8,9 @@ use serde::{Deserialize, Serialize};
 use super::friction::FrictionMode;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum Instrument {
+    #[default]
     Violin,
     Viola,
     Cello,
@@ -91,11 +93,6 @@ impl Instrument {
     }
 }
 
-impl Default for Instrument {
-    fn default() -> Self {
-        Instrument::Violin
-    }
-}
 
 impl Instrument {
     /// Inverse-body-length body-mode frequency scale (Gough 2016 family).
@@ -119,16 +116,13 @@ impl Instrument {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum FrictionKind {
     Static,
+    #[default]
     ElastoPlastic,
 }
 
-impl Default for FrictionKind {
-    fn default() -> Self {
-        FrictionKind::ElastoPlastic
-    }
-}
 
 impl From<FrictionKind> for FrictionMode {
     fn from(k: FrictionKind) -> Self {

@@ -477,6 +477,7 @@ mod tests {
         assert_eq!(h, 2615062553043384055u64, "archet ModalString::process drifted");
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn render(f0: f32, b1: f32, b2: f32, stiff: f32, beta: f32, vb: f32, fb: f32,
               secs: f32) -> (Vec<f32>, f32) {
         let sr = 48000.0;
@@ -492,7 +493,7 @@ mod tests {
         let mut hp = 0.0f32;
         let mut dec = 0.0f32; // decimation lowpass state
         let alpha = 1.0 - (-2.0 * std::f32::consts::PI * 16000.0 / (sr * os as f32)).exp();
-        for i in 0..nframes {
+        for o in out.iter_mut() {
             let mut raw = 0.0f32;
             for _ in 0..os {
                 let r = s.process(vb, fb);
@@ -500,7 +501,7 @@ mod tests {
                 raw = dec;
             }
             hp += (raw - hp) * (1.0 - (-2.0 * std::f32::consts::PI * 20.0 / sr).exp());
-            out[i] = raw - hp; // 20 Hz highpass
+            *o = raw - hp; // 20 Hz highpass
         }
         // normalize
         let pk = out.iter().fold(0.0f32, |m, &x| m.max(x.abs())).max(1e-9);

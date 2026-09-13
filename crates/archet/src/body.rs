@@ -88,7 +88,6 @@ impl Biquad {
 /// specs below): a bass is not a violin scaled down, its air resonance sits
 /// at a quarter of the violin's and its bridge hill below a kilohertz.
 /// Output = parallel SUM of the resonators (the modal admittance), not a series EQ.
-
 // Gains CALIBRATED to Duennwald's old-Italian profile via the `dunnwald` test below:
 // the A band (190-650, sonority) must be STRONG, the 650-1300 band suppressed
 // (anti-nasality +4..6 dB), brilliance balanced with A, >4200 Hz well down (clarity).
