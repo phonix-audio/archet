@@ -161,7 +161,6 @@ dependencies = [
  "phonix-plugin",
  "phonix-rt",
  "phonix-ui",
- "ron",
  "serde",
  "serde_json",
  "wayland-sys",

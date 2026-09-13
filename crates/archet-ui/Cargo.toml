@@ -18,8 +18,6 @@ phonix-ui    = { workspace = true }   # icons, colors, widgets, keyboard, ui_spe
 phonix-fx     = { workspace = true }
 phonix-rt     = { workspace = true }   # the lock-free meter channel
 phonix-plugin = { workspace = true }   # the `Preset` trait the picker reads
-# The editor's three spec tests parse the baked `ui_specs/archet.ron` themselves.
-ron          = { workspace = true }
 
 # No `rfd` / `directories` here, and no `[features]` table. This editor has no
 # file dialog of its own: its Save/Load buttons call `phonix_ui::preset_io`, and
