@@ -393,7 +393,7 @@ impl ArchetPatch {
             named(Self { pluck: true, vib_depth: 0.0, bow_noise: 0.0, release: 0.12,
                          ..Self::double_bass() }, "Bass Pizzicato"),
             named(Self { pluck: true, vib_depth: 0.0, bow_noise: 0.0, release: 0.06,
-                         ensemble: 12.0, polyphony: 24, auto_range: true,
+                         ensemble: 12.0, polyphony: 32, auto_range: true,
                          ..Self::default() }, "Pizzicato Section"),
         ]
     }

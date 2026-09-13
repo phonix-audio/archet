@@ -18,6 +18,8 @@ use super::voice::{ArchetVoice, MAX_VOICES};
 /// Both `fire_unison` and the voice-sum norm need it: one to spend the
 /// voices, the other to divide by what a note actually lights.
 const PHYS_CAP: usize = 8;
+/// Physical voices a plucked section lights per note.
+const PLUCK_CAP: usize = 4;
 
 #[derive(Debug, Clone)]
 pub enum ArchetCommand {
@@ -468,8 +470,12 @@ impl ArchetEngine {
         // scatter band. Requested sizes ABOVE the cap are realized by the
         // O(1) section diffuser (engine output) -- cost stays flat, so a
         // 100-violin setting is feasible.
+        // A plucked section needs fewer players to read as many: their
+        // attacks are already spread in time, and each note must leave the
+        // pool room for the chords a pizzicato part writes.
+        let cap = if self.patch.pluck { PLUCK_CAP } else { PHYS_CAP };
         let size = self.patch.ensemble.max(2.0);
-        let count: usize = (size.round() as usize).clamp(2, PHYS_CAP);
+        let count: usize = (size.round() as usize).clamp(2, cap);
         // measured inter-player F0 dispersion of a real section is 20-30 cents
         // (Cuesta/Chandna unison analysis; Ternstroem) -- NOT the 14c tight-
         // unison preference. 22c SD here + the per-voice slow drift gives the
@@ -2375,6 +2381,6 @@ mod golden_audio {
             }
         }
         eprintln!("GOLDEN = {h:#018x}");
-        assert_eq!(h, 0x3cc49f89fd7b29d2, "the engine's rendered audio changed");
+        assert_eq!(h, 0x3a3b_2173_9ed3_95c9, "the engine's rendered audio changed");
     }
 }
