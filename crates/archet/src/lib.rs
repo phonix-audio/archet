@@ -16,7 +16,6 @@ pub mod fx;
 pub mod fingerprint;
 pub mod modal;
 pub mod patch;
-pub mod section;
 pub mod sympathetic;
 pub mod voice;
 

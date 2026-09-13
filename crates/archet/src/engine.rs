@@ -11,13 +11,16 @@ use super::patch::{ArchetParam, ArchetPatch};
 use super::sympathetic::SympStrings;
 use super::voice::{ArchetVoice, MAX_VOICES};
 
-/// Physical voices a unison ever lights, whatever section size is asked for:
-/// the perceptual-saturation pool (Ternstroem), enough independent
-/// instantaneous pitches to fill the scatter band. Larger sections are
-/// realised by the O(1) section diffuser instead, so the cost stays flat.
+/// Physical voices a unison ever lights, whatever section size is asked
+/// for: the number of independent players past which the richness of a
+/// section no longer grows to the ear (Ternstroem, eight to twelve). A
+/// larger section is these voices at the level of the larger section.
 /// Both `fire_unison` and the voice-sum norm need it: one to spend the
 /// voices, the other to divide by what a note actually lights.
-const PHYS_CAP: usize = 8;
+const PHYS_CAP: usize = 12;
+/// The most a larger section may add over the voices that render it, in
+/// dB: the incoherent sum of its players, held within the chord headroom.
+const SECTION_GAIN_CAP_DB: f32 = 3.0;
 /// Physical voices a plucked section lights per note.
 const PLUCK_CAP: usize = 4;
 
@@ -77,9 +80,6 @@ pub struct ArchetEngine {
     applied_seed: u32,
     symp_level: f32,
     note_seq: u64, // monotonic note-on counter (oldest-voice release)
-    // The section diffuser: the rest of the section above the bounded
-    // voice pool (section.rs). Bypassed when the section is small.
-    section: crate::section::SectionDiffuser,
 }
 
 impl ArchetEngine {
@@ -105,7 +105,6 @@ impl ArchetEngine {
             applied_seed: 0,
             symp_level: 0.015,
             note_seq: 0,
-            section: crate::section::SectionDiffuser::new(sample_rate),
         }
     }
 
@@ -118,7 +117,6 @@ impl ArchetEngine {
         self.sample_rate = sample_rate;
         self.voices = (0..MAX_VOICES).map(|i| ArchetVoice::new(sample_rate, i)).collect();
         self.symp = SympStrings::new(sample_rate, self.symp_inst);
-        self.section = crate::section::SectionDiffuser::new(sample_rate);
         self.held_keys.clear();
         self.patch_dirty = true;
     }
@@ -167,12 +165,11 @@ impl ArchetEngine {
         } else {
             1
         };
-        let norm = (1.0 / (CHORD * lit as f32).sqrt()) * self.patch.output_level;
-        // diffuser fill = how far the requested section exceeds the real
-        // voice pool (8 -> 0, ~40+ -> 1, saturating). O(1) regardless of size.
-        let fill = if self.patch.ensemble > 8.0 {
-            ((self.patch.ensemble - 8.0) / 60.0).clamp(0.0, 1.0)
-        } else { 0.0 };
+        // A section larger than the voices that render it is louder by the
+        // incoherent sum of its players, within the headroom.
+        let asked = self.patch.ensemble.round().max(1.0);
+        let larger_db = (10.0 * (asked / lit as f32).max(1.0).log10()).min(SECTION_GAIN_CAP_DB);
+        let norm = (1.0 / (CHORD * lit as f32).sqrt()) * 10f32.powf(larger_db / 20.0) * self.patch.output_level;
         // The open strings a plucked note occupies right now cannot ring in
         // sympathy: they are the strings sounding, under a finger or plucked.
         let mut held = [false; 4];
@@ -219,15 +216,8 @@ impl ArchetEngine {
             // is one tail and does not branch on the stroke. The tail is a
             // global resonance: driven by the mono sum, added centered.
             let tail = self.symp.process(mono) * self.symp_level;
-            // large-section fill: diffuse the (dry) voice field toward the
-            // continuous many-player texture; the tail stays clean + centered.
-            let (dl, dr) = if fill > 0.0 {
-                self.section.process(sl, sr_, fill)
-            } else {
-                (sl, sr_)
-            };
-            let l = (dl + tail).clamp(-1.0, 1.0);
-            let r = (dr + tail).clamp(-1.0, 1.0);
+            let l = (sl + tail).clamp(-1.0, 1.0);
+            let r = (sr_ + tail).clamp(-1.0, 1.0);
 
             self.peak_l = self.peak_l.max(l.abs());
             self.peak_r = self.peak_r.max(r.abs());
@@ -572,7 +562,7 @@ mod preset_sweep_tests {
             left.extend(buf.iter().step_by(2));
         }
         let h = crate::fingerprint::of(&left);
-        const GOLDEN: u64 = 0xc12e408ddcf2d7d2; // the ensemble render, note-offs included
+        const GOLDEN: u64 = 0x54edad9e00966a85; // the ensemble render, note-offs included
         assert_eq!(h, GOLDEN, "Archet ensemble render drifted from golden (hash {h:#018x})");
     }
 }
@@ -1689,6 +1679,79 @@ mod profile {
         }
     }
 
+    /// A section of one, four, eight, sixteen and thirty players holding
+    /// one note: level, the width of the fundamental's band, and the slow
+    /// level modulation, with a file per size to hear.
+    ///   cargo test --release --lib engine::profile::section_ladder -- --ignored --nocapture
+    #[test]
+    #[ignore = "diagnostic - run with --ignored"]
+    fn section_ladder() {
+        let sr = 48_000.0_f32;
+        let block = 256usize;
+        let bank = crate::patch::ArchetPatch::factory_presets();
+        let preset = bank
+            .iter()
+            .find(|p| p.name == "Violin Section")
+            .expect("the bank no longer has Violin Section");
+        println!("  players   rms dBFS   fundamental band at -6 dB (cents)   level modulation < 2 Hz (dB std)");
+        for players in [1.0f32, 4.0, 8.0, 16.0, 30.0] {
+            let (mut eng, tx, _mr) = ArchetEngine::new_for_plugin(sr);
+            let mut p = preset.clone();
+            p.ensemble = players;
+            p.polyphony = 32;
+            tx.send(ArchetCommand::LoadPatch(Box::new(p))).unwrap();
+            let mut buf = vec![0.0f32; block * 2];
+            eng.process_audio(&mut buf, 2);
+            tx.send(ArchetCommand::NoteOn(69, 90)).unwrap();
+            let mut out: Vec<f32> = Vec::new();
+            let hold = (3.0 * sr) as usize / block;
+            for i in 0..hold + (1.0 * sr) as usize / block {
+                if i == hold {
+                    tx.send(ArchetCommand::NoteOff(69)).unwrap();
+                }
+                buf.fill(0.0);
+                eng.process_audio(&mut buf, 2);
+                out.extend_from_slice(&buf);
+            }
+            let mono: Vec<f32> = out.chunks(2).map(|c| 0.5 * (c[0] + c[1])).collect();
+            let steady = &mono[(1.0 * sr) as usize..(3.0 * sr) as usize];
+            let rms = (steady.iter().map(|x| x * x).sum::<f32>() / steady.len() as f32).sqrt();
+            // the fundamental's band: a DFT over the steady part, 2 Hz per bin
+            let n = steady.len();
+            let f0 = 440.0f32;
+            let mut mags = Vec::new();
+            for cents in (-120..=120).step_by(4) {
+                let f = f0 * 2f32.powf(cents as f32 / 1200.0);
+                let (mut re, mut im) = (0.0f64, 0.0f64);
+                for (k, &x) in steady.iter().enumerate() {
+                    let w = 0.5 - 0.5 * (std::f64::consts::TAU * k as f64 / n as f64).cos();
+                    let ph = std::f64::consts::TAU * f as f64 * k as f64 / sr as f64;
+                    re += w * x as f64 * ph.cos();
+                    im -= w * x as f64 * ph.sin();
+                }
+                mags.push((cents, (re * re + im * im).sqrt()));
+            }
+            let peak = mags.iter().map(|m| m.1).fold(0.0, f64::max);
+            let above: Vec<i32> = mags.iter().filter(|m| m.1 >= peak * 0.5).map(|m| m.0).collect();
+            let width = above.iter().max().unwrap_or(&0) - above.iter().min().unwrap_or(&0);
+            // slow level modulation: 50 ms rms frames, their spread in dB
+            let hop = (0.05 * sr) as usize;
+            let frames: Vec<f32> = steady
+                .chunks(hop)
+                .map(|c| 20.0 * (c.iter().map(|x| x * x).sum::<f32>() / c.len() as f32).sqrt().max(1e-9).log10())
+                .collect();
+            let mean = frames.iter().sum::<f32>() / frames.len() as f32;
+            let std = (frames.iter().map(|f| (f - mean).powi(2)).sum::<f32>() / frames.len() as f32).sqrt();
+            println!(
+                "  {players:>7.0}   {:>8.1}   {width:>32}   {std:>30.2}",
+                20.0 * rms.max(1e-9).log10()
+            );
+            let path = format!("/tmp/archet_section_{}.wav", players as u32);
+            write_wav(&path, &mono, sr);
+        }
+        println!("  wrote /tmp/archet_section_{{1,4,8,16,30}}.wav");
+    }
+
     /// The cost of the largest section: a four-note chord held on the
     /// largest violin section, timed against the audio it renders.
     ///   cargo test --release --lib engine::profile::section_load -- --ignored --nocapture
@@ -2466,6 +2529,6 @@ mod golden_audio {
         }
         let h = crate::fingerprint::of(&left);
         eprintln!("GOLDEN = {h:#018x}");
-        assert_eq!(h, 0xd246_c8a6_7afe_10f6, "the engine's rendered audio changed");
+        assert_eq!(h, 0x11404189a2b3d53a, "the engine's rendered audio changed");
     }
 }

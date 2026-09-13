@@ -72,12 +72,10 @@ const LOSS_NEUTRAL: f32 = 0.30;
 pub const PLUCK_SPOT: f32 = 0.185;
 
 /// Slow intonation drift: the corner of a one-pole walk and its rms in
-/// cents for a soloist (recorded held notes move by one to three cents rms
-/// below 1.5 Hz) and for each player of a section (the time-varying part
-/// of the measured inter-player spread).
+/// cents, the same for a soloist and for each player of a section
+/// (recorded held notes move by one to three cents rms below 1.5 Hz).
 const DRIFT_HZ: f32 = 0.4;
-const DRIFT_SOLO_CENTS: f32 = 2.0;
-const DRIFT_SECTION_CENTS: f32 = 6.0;
+const DRIFT_CENTS: f32 = 2.0;
 
 /// 1/f (pink) noise: octave-spaced one-pole-filtered white sources summed
 /// (Voss-McCartney-style). Natural/musical fluctuations are 1/f, not white or
@@ -1103,7 +1101,7 @@ impl ArchetVoice {
             self.drift += (self.hum.next() - self.drift) * pole;
             let unit_rms = (pole / (2.0 - pole)).sqrt() / 3f32.sqrt();
             let drift_cents = self.drift / unit_rms
-                * if patch.ensemble >= 1.5 { DRIFT_SECTION_CENTS } else { DRIFT_SOLO_CENTS };
+                * DRIFT_CENTS;
             let cents = lfo * depth * vib_env + self.flutter * 0.8 * alive + jitter + drift_cents;
             self.bend = 2f32.powf(cents / 1200.0);
             // The legato glide: freq_hz ramps toward freq_target over about
