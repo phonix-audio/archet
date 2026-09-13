@@ -41,6 +41,14 @@ in what order is fixed; everything inside them is the player's.
 `scripts/screenshots.sh` renders these headless from the editor's own
 snapshot tests and `--check` fails when the pictures fall behind it.
 
+## Level
+
+The engine rides its own fader: the summed output is held at full scale
+whatever the section or the level asks, with the gain kept for two
+periods of the lowest string sounding and returned at a walking pace, so
+a section grows louder with its players until full scale and only denser
+past it. Nothing in the engine clips.
+
 ## Effects
 
 The engine owns no effects. Each patch describes a chain of three, in a

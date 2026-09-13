@@ -375,8 +375,8 @@ impl ArchetPatch {
 }
 
 /// The output level every factory preset ships at. The engine's own
-/// headroom keeps an eight-voice chord at full velocity under full scale
-/// with no chain in the way; a preset carries a ceiling, so it sits higher.
+/// headroom keeps an eight-voice chord of a soloist at full velocity
+/// under full scale, and its fader holds anything past it.
 pub const PRESET_LEVEL: f32 = 1.4;
 
 impl phonix_plugin::preset::Preset for ArchetPatch {

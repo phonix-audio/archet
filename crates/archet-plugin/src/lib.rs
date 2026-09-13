@@ -755,44 +755,6 @@ mod fx_chain_compat {
         assert_eq!(held.len(), archet::fx::FX_SLOTS);
     }
 
-    /// A chord of the largest section peaks past full scale in the bare
-    /// engine and under the preset's ceiling after its chain.
-    #[test]
-    fn a_section_chord_stays_under_the_preset_ceiling() {
-        use phonix_fx::{Chain, Musical, Transport};
-        let sr = 48_000.0f32;
-        let block = 512usize;
-        let preset = ArchetPatch::factory_presets()
-            .into_iter()
-            .find(|p| p.name == "Violin Section Large")
-            .expect("the bank no longer has Violin Section Large");
-        let (mut eng, tx, _mr) = ArchetEngine::new_for_plugin(sr);
-        tx.send(ArchetCommand::LoadPatch(Box::new(preset.clone()))).unwrap();
-        let mut chain = Chain::new(sr, block);
-        fx::apply(&mut chain, &preset.fx);
-        for n in [60u8, 64, 67, 72] {
-            tx.send(ArchetCommand::NoteOn(n, 120)).unwrap();
-        }
-        let mut buf = vec![0.0f32; block * 2];
-        let (mut l, mut r) = (vec![0.0f32; block], vec![0.0f32; block]);
-        let (mut raw_peak, mut out_peak) = (0.0f32, 0.0f32);
-        for i in 0..((2.0 * sr) as usize / block) {
-            buf.fill(0.0);
-            eng.process_audio(&mut buf, 2);
-            for k in 0..block {
-                l[k] = buf[k * 2];
-                r[k] = buf[k * 2 + 1];
-            }
-            chain.process(&mut l, &mut r, &[], Transport::default(), Musical::default());
-            if i * block > (0.5 * sr) as usize {
-                raw_peak = raw_peak.max(buf.iter().fold(0.0f32, |m, x| m.max(x.abs())));
-                out_peak = out_peak.max(l.iter().chain(r.iter()).fold(0.0f32, |m, x| m.max(x.abs())));
-            }
-        }
-        assert!(raw_peak > 1.0, "the bare engine peaked at {raw_peak}: the ceiling is not what holds it");
-        assert!(out_peak <= 1.0, "past the ceiling: {out_peak}");
-    }
-
     /// Init is the absence of a factory preset: the patch it builds carries
     /// the default chain, and `process` disengages it when the parameter
     /// reads zero, so nothing here may depend on the chain being empty.
@@ -800,5 +762,105 @@ mod fx_chain_compat {
     fn the_init_patch_names_itself() {
         let params = ArchetParams::default();
         assert_eq!(params.build_init_patch().name, "Init");
+    }
+}
+
+/// The factory bank against its ceilings.
+#[cfg(test)]
+mod bank {
+    use super::*;
+    use archet::patch::Instrument;
+    use archet::{ArchetCommand, ArchetEngine, ArchetPatch};
+    use phonix_fx::{Chain, Musical, Transport};
+
+    fn db(x: f32) -> f32 {
+        20.0 * x.max(1e-9).log10()
+    }
+
+    /// The most a preset's reference chord may lean on its ceiling, in dB
+    /// of gain reduction. Past it the ceiling is heard working.
+    const LEAN_DB: f32 = 2.0;
+
+    /// The chord a preset is trimmed on: a double stop for a soloist, a
+    /// spread chord for a section, the whole range for a composite desk.
+    fn reference(p: &ArchetPatch) -> &'static [u8] {
+        let section = p.ensemble >= 1.5;
+        if p.auto_range {
+            &[36, 43, 52, 60, 67, 76]
+        } else {
+            match (p.instrument, section) {
+                (Instrument::Violin, false) => &[62, 69],
+                (Instrument::Viola, false) => &[55, 62],
+                (Instrument::Cello, false) => &[43, 50],
+                (Instrument::DoubleBass, false) => &[35, 42],
+                (Instrument::Violin, true) => &[55, 62, 67, 74],
+                (Instrument::Viola, true) => &[48, 55, 60, 67],
+                (Instrument::Cello, true) => &[36, 43, 48, 55],
+                (Instrument::DoubleBass, true) => &[28, 35, 40, 47],
+            }
+        }
+    }
+
+    /// What one preset does under its reference chord at full velocity:
+    /// the bare engine's peak, the peak the ceiling is asked to hold, and
+    /// the output rms, all in dB. The ceiling's input is read through a
+    /// second chain fed the same audio well under the ceiling, since the
+    /// two effects before it are linear.
+    fn measure(preset: &ArchetPatch) -> (f32, f32, f32) {
+        let sr = 48_000.0f32;
+        let block = 512usize;
+        const QUIET: f32 = 1e-3;
+        let (mut eng, tx, _mr) = ArchetEngine::new_for_plugin(sr);
+        tx.send(ArchetCommand::LoadPatch(Box::new(preset.clone()))).unwrap();
+        let mut chain = Chain::new(sr, block);
+        fx::apply(&mut chain, &preset.fx);
+        let mut probe = Chain::new(sr, block);
+        fx::apply(&mut probe, &preset.fx);
+        for &n in reference(preset) {
+            tx.send(ArchetCommand::NoteOn(n, 127)).unwrap();
+        }
+        let mut buf = vec![0.0f32; block * 2];
+        let (mut l, mut r) = (vec![0.0f32; block], vec![0.0f32; block]);
+        let (mut ql, mut qr) = (vec![0.0f32; block], vec![0.0f32; block]);
+        let (mut raw_peak, mut in_peak, mut out_sq, mut n) = (0.0f32, 0.0f32, 0.0f64, 0usize);
+        let settle = (0.4 * sr) as usize;
+        for i in 0..((1.6 * sr) as usize / block) {
+            buf.fill(0.0);
+            eng.process_audio(&mut buf, 2);
+            for k in 0..block {
+                l[k] = buf[k * 2];
+                r[k] = buf[k * 2 + 1];
+                ql[k] = l[k] * QUIET;
+                qr[k] = r[k] * QUIET;
+            }
+            chain.process(&mut l, &mut r, &[], Transport::default(), Musical::default());
+            probe.process(&mut ql, &mut qr, &[], Transport::default(), Musical::default());
+            if i * block > settle {
+                raw_peak = raw_peak.max(buf.iter().fold(0.0f32, |m, x| m.max(x.abs())));
+                in_peak = in_peak.max(ql.iter().chain(qr.iter()).fold(0.0f32, |m, x| m.max(x.abs())) / QUIET);
+                out_sq += l.iter().chain(r.iter()).map(|x| (*x as f64).powi(2)).sum::<f64>();
+                n += buf.len();
+            }
+        }
+        (db(raw_peak), db(in_peak), db((out_sq / n as f64).sqrt() as f32))
+    }
+
+    /// Every preset's reference chord at full velocity leans on its
+    /// ceiling by no more than a hearing threshold: the engine's fader
+    /// holds the level, and the ceiling is left the inter-sample rest.
+    #[test]
+    #[cfg_attr(debug_assertions, ignore = "runs the whole bank; release only")]
+    fn every_preset_sits_under_its_ceiling() {
+        println!("{:<24} {:>8} {:>8} {:>8}", "preset", "raw pk", "at ceil", "out rms");
+        let mut failed = Vec::new();
+        for preset in ArchetPatch::factory_presets() {
+            let (pk, at, out) = measure(&preset);
+            let lean = at - archet::fx::CEILING_DB;
+            println!("{:<24} {:>8.1} {:>8.1} {:>8.1}", preset.name, pk, at, out);
+            if lean > LEAN_DB {
+                failed.push(format!("{} reaches its ceiling at {lean:+.1} dB", preset.name));
+            }
+        }
+        assert!(failed.is_empty(), "{}", failed.join("\n"));
     }
 }

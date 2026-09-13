@@ -65,8 +65,62 @@ pub struct ArchetMeterState {
     pub patch_snapshot: Option<ArchetPatch>,
 }
 
+/// The engine's own ceiling: a fader ride on the summed output. The gain
+/// is one until the sum reaches full scale, then whatever brings the peak
+/// back to it; that peak is held for two periods of the lowest string
+/// sounding, so the gain never moves inside a cycle, and it comes back at
+/// a walking pace once the peak has passed. A section is as loud as its
+/// players up to full scale and only denser past it; a soloist is never
+/// touched. Inter-sample overshoot is left to the chain behind the engine.
+struct Fader {
+    /// The highest peak seen since the hold began.
+    held: f32,
+    /// Samples the held peak is kept before it starts to fall.
+    hold_left: usize,
+    /// How many samples a new peak is held; set per block from the lowest
+    /// string sounding.
+    hold: usize,
+    /// Per-sample factor the held peak falls by once its hold has run out.
+    fall: f32,
+}
+
+impl Fader {
+    /// The pace the gain comes back at, in dB per second.
+    const RETURN_DB_PER_S: f32 = 6.0;
+    /// Periods of the lowest string the peak is held for.
+    const HOLD_PERIODS: f32 = 2.0;
+
+    fn new(sample_rate: f32) -> Self {
+        Self {
+            held: 0.0,
+            hold_left: 0,
+            hold: 0,
+            fall: 10f32.powf(-Self::RETURN_DB_PER_S / 20.0 / sample_rate),
+        }
+    }
+
+    /// Set the hold from the lowest frequency sounding.
+    fn hold_for(&mut self, lowest_hz: f32, sample_rate: f32) {
+        self.hold = (Self::HOLD_PERIODS * sample_rate / lowest_hz.max(1.0)).ceil() as usize;
+    }
+
+    /// The gain for a stereo pair with this peak.
+    fn gain(&mut self, peak: f32) -> f32 {
+        if peak >= self.held {
+            self.held = peak;
+            self.hold_left = self.hold;
+        } else if self.hold_left > 0 {
+            self.hold_left -= 1;
+        } else {
+            self.held *= self.fall;
+        }
+        if self.held > 1.0 { 1.0 / self.held } else { 1.0 }
+    }
+}
+
 pub struct ArchetEngine {
     voices: Vec<ArchetVoice>,
+    fader: Fader,
     /// The keys that are down. What the keyboard shows: a released note
     /// rings on, and a keyboard lit through its release reads as stuck.
     held_keys: Vec<u8>,
@@ -99,6 +153,7 @@ impl ArchetEngine {
     ) -> Self {
         Self {
             voices: (0..MAX_VOICES).map(|i| ArchetVoice::new(sample_rate, i)).collect(),
+            fader: Fader::new(sample_rate),
             held_keys: Vec::new(),
             patch: ArchetPatch::default(),
             command_rx,
@@ -125,6 +180,7 @@ impl ArchetEngine {
         if (sample_rate - self.sample_rate).abs() < 1e-3 { return; }
         self.sample_rate = sample_rate;
         self.voices = (0..MAX_VOICES).map(|i| ArchetVoice::new(sample_rate, i)).collect();
+        self.fader = Fader::new(sample_rate);
         self.symp = SympStrings::new(sample_rate, self.symp_inst);
         self.held_keys.clear();
         self.patch_dirty = true;
@@ -172,8 +228,8 @@ impl ArchetEngine {
         let lit = self.voices_per_note();
         // A section is as loud as its players' incoherent sum, the root of
         // their number (Meyer): the voices that render it already sum so,
-        // and a section larger than them gets the rest as gain. A chain's
-        // ceiling holds it in a preset; in Init the level control does.
+        // and a section larger than them gets the rest as gain, up to full
+        // scale, where the fader holds it.
         let asked = if self.patch.ensemble >= 1.5 { self.patch.ensemble.round().max(2.0) } else { 1.0 };
         let larger = (asked / lit as f32).max(1.0).sqrt();
         let norm = (1.0 / CHORD.sqrt()) * larger * self.patch.output_level;
@@ -195,6 +251,14 @@ impl ArchetEngine {
             held = [true; 4];
         }
         self.symp.set_held(held);
+        let lowest = self.voices[..poly]
+            .iter()
+            .filter(|v| v.is_active())
+            .map(|v| v.frequency())
+            .fold(f32::INFINITY, f32::min);
+        if lowest.is_finite() {
+            self.fader.hold_for(lowest, self.sample_rate);
+        }
         for frame_idx in 0..frames {
             // Per-voice constant-power panning: in ensemble mode each unison
             // player is seated at its own azimuth, set at note-on. Other
@@ -223,11 +287,9 @@ impl ArchetEngine {
             // is one tail and does not branch on the stroke. The tail is a
             // global resonance: driven by the mono sum, added centered.
             let tail = self.symp.process(mono) * self.symp_level;
-            // Unclamped: a large section rightly peaks past full scale, and
-            // the ceiling that holds it is the preset chain's, after the
-            // engine; a hard clip here would crack before it could act.
-            let l = sl + tail;
-            let r = sr_ + tail;
+            let g = self.fader.gain((sl + tail).abs().max((sr_ + tail).abs()));
+            let l = (sl + tail) * g;
+            let r = (sr_ + tail) * g;
 
             self.peak_l = self.peak_l.max(l.abs());
             self.peak_r = self.peak_r.max(r.abs());
@@ -2759,5 +2821,79 @@ mod golden_audio {
         let h = crate::fingerprint::of(&left);
         eprintln!("GOLDEN = {h:#018x}");
         assert_eq!(h, 0x3293e0b64bb23f5c, "the engine's rendered audio changed");
+    }
+}
+
+#[cfg(test)]
+mod fader {
+    use super::*;
+
+    fn render(patch: ArchetPatch, chord: &[u8], secs: f32) -> Vec<f32> {
+        let sr = 48_000.0f32;
+        let block = 512usize;
+        let (mut eng, tx, _mr) = ArchetEngine::new_for_plugin(sr);
+        tx.send(ArchetCommand::LoadPatch(Box::new(patch))).unwrap();
+        for &n in chord {
+            tx.send(ArchetCommand::NoteOn(n, 127)).unwrap();
+        }
+        let mut out = Vec::new();
+        let mut buf = vec![0.0f32; block * 2];
+        for _ in 0..((secs * sr) as usize / block) {
+            buf.fill(0.0);
+            eng.process_audio(&mut buf, 2);
+            out.extend_from_slice(&buf);
+        }
+        out
+    }
+
+    fn peak(x: &[f32]) -> f32 {
+        x.iter().fold(0.0f32, |m, v| m.max(v.abs()))
+    }
+
+    /// The largest section holding a chord at full velocity never passes
+    /// full scale, and the fader is what holds it: the same chord with the
+    /// fader's gain undone would.
+    #[test]
+    fn a_section_chord_is_held_at_full_scale() {
+        let mut p = ArchetPatch::violin();
+        p.ensemble = 30.0;
+        p.polyphony = 32;
+        p.output_level = 1.4;
+        let out = render(p, &[55, 62, 67, 74], 1.5);
+        assert!(peak(&out) <= 1.0, "past full scale: {}", peak(&out));
+        let settled = &out[(1.0 * 48_000.0 * 2.0) as usize..];
+        assert!(peak(settled) > 0.8, "held far under full scale: {}", peak(settled));
+    }
+
+    /// A soloist's note stays under full scale on its own headroom, so
+    /// the fader leaves it alone: its gain is one throughout.
+    #[test]
+    fn a_soloist_is_not_touched() {
+        let mut f = Fader::new(48_000.0);
+        f.hold_for(196.0, 48_000.0);
+        let out = render(ArchetPatch::violin(), &[69], 1.0);
+        assert!(peak(&out) < 1.0);
+        for pair in out.chunks(2) {
+            assert_eq!(f.gain(pair[0].abs().max(pair[1].abs())), 1.0);
+        }
+    }
+
+    /// The held peak is kept for the hold and then falls at the return
+    /// pace: after one second the gain has come back six decibels.
+    #[test]
+    fn the_gain_comes_back_at_a_walking_pace() {
+        let sr = 48_000.0f32;
+        let mut f = Fader::new(sr);
+        f.hold_for(41.2, sr);
+        assert!((f.gain(4.0) - 0.25).abs() < 1e-6);
+        let hold = f.hold;
+        for _ in 0..hold {
+            assert!((f.gain(0.0) - 0.25).abs() < 1e-6, "the hold let go early");
+        }
+        for _ in 0..(sr as usize) {
+            f.gain(0.0);
+        }
+        let g = f.gain(0.0);
+        assert!((20.0 * (g / 0.25).log10() - Fader::RETURN_DB_PER_S).abs() < 0.05, "gain {g}");
     }
 }

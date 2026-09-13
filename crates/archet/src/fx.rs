@@ -48,6 +48,9 @@ pub const CONCERT: Space =
 pub const ROOM: Space =
     Space { kind: "room", size: 0.25, decay: 0.30, damping: 0.60, predelay: 0.008, mix: 0.12 };
 
+/// Where every preset's ceiling sits, in dBFS.
+pub const CEILING_DB: f32 = -0.3;
+
 /// Build the chain. Units are the effects' own: the EQ in Hz and dB, the
 /// reverb normalised except a pre-delay in seconds, the limiter's ceiling
 /// in dB and its release in milliseconds.
@@ -70,7 +73,7 @@ pub fn chain(space: Space) -> ChainSpec {
         // Safety, not character: how loud is too loud is not a musical
         // choice.
         SlotSpec::new("brickwall-limiter")
-            .with("ceiling", -0.3_f32)
+            .with("ceiling", CEILING_DB)
             .with("release", 50.0_f32),
     ])
 }

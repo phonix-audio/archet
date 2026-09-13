@@ -313,6 +313,8 @@ impl ArchetVoice {
     /// Stage azimuth for this voice (-1 L .. +1 R); the ensemble seats each
     /// unison player. 0 for ordinary notes.
     pub fn pan(&self) -> f32 { self.unison_pan }
+    /// The frequency sounding now, in Hz.
+    pub fn frequency(&self) -> f32 { self.freq_hz }
 
     /// Set the unison player's static F0 offset (cents), stage pan and onset
     /// delay (samples) before a note-on (the section's scatter and bow
