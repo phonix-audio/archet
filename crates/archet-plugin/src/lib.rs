@@ -11,7 +11,12 @@
 
 use nice_plug::prelude::*;
 use nice_plug_egui::{create_egui_editor, EguiState};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, RwLock};
+
+mod fx;
+use fx::FxLink;
+use phonix_fx::{Chain, ChainSpec, Musical, Transport};
 
 use archet::engine::{ArchetCommand, ArchetEngine, ArchetMeterState};
 use archet::patch::{ArchetPatch, Instrument};
@@ -29,8 +34,15 @@ pub struct ArchetPlugin {
     meter_reader:    Option<SharedReader<ArchetMeterState>>,
     pending:         Option<(mpsc::Receiver<ArchetCommand>, Writer<ArchetMeterState>)>,
     interleaved_buf: Vec<f32>,
+    buf_l:           Vec<f32>,
+    buf_r:           Vec<f32>,
     factory_presets: Vec<ArchetPatch>,
     last_preset:     i32,
+    /// The chain the patch describes, built by the host after the engine.
+    fx_chain:        Option<Chain>,
+    /// The chain as the editor and the audio thread hand it to each other.
+    fx_link:         Arc<FxLink>,
+    fx_seen:         u64,
     /// Snapshot of the Init-mode param values last pushed, so we only rebuild +
     /// LoadPatch when something changed (no per-block heap allocation at idle).
     last_init_sig:   Option<[f32; INIT_SIG_LEN]>,
@@ -84,8 +96,13 @@ impl Default for ArchetPlugin {
             meter_reader:    Some(meter_reader),
             pending:         Some((rx, meter_writer)),
             interleaved_buf: Vec::new(),
+            buf_l:           Vec::new(),
+            buf_r:           Vec::new(),
             factory_presets: presets,
             last_preset:     0,
+            fx_chain:        None,
+            fx_link:         Arc::new(FxLink::new(ChainSpec::default())),
+            fx_seen:         0,
             last_init_sig:   None,
         }
     }
@@ -397,6 +414,14 @@ impl Plugin for ArchetPlugin {
         // the closure below publishes the default patch over it.
         if let Ok(p) = patch_state.read() { app.set_patch(p.clone()); }
         let host_params = self.params.clone();
+        let bank = Arc::new(self.factory_presets.clone());
+        let fx_link = self.fx_link.clone();
+        // The closure must be Sync, so the counter it remembers is an atomic.
+        let seen = AtomicU64::new(fx_link.rev());
+        // Seed the page from the restored patch, as the patch itself is above.
+        if let Ok(p) = patch_state.read() {
+            self.fx_link.seed(p.fx.clone());
+        }
 
         create_egui_editor(
             self.params.editor_state.clone(),
@@ -404,10 +429,27 @@ impl Plugin for ArchetPlugin {
             Default::default(),
             |_egui_ctx, _queue, _app| {},
             move |ui, setter, _queue, app| {
+                // A preset change replaced the chain: adopt it before
+                // drawing, or the page shows the previous preset's effects.
+                let mut seen_now = seen.load(Ordering::Relaxed);
+                if let Some(spec) = fx_link.adopt(&mut seen_now) {
+                    app.set_fx(spec);
+                    seen.store(seen_now, Ordering::Relaxed);
+                }
                 app.draw_ui(ui);
+                // The page moved something: publish it, and the audio thread
+                // takes it on its next block.
+                if app.take_fx_changed() {
+                    seen.store(fx_link.publish(app.fx().clone()), Ordering::Relaxed);
+                }
                 // A preset picked in the window moves the parameter, and the
                 // parameter loads the patch: one path, automation included.
+                // Its chain goes through the link as well: a preset picked
+                // again is the same parameter value, and the audio thread
+                // would never hear of it otherwise.
                 if let Some(i) = app.take_wants_preset() {
+                    let chain = bank.get((i - 1).max(0) as usize).filter(|_| i > 0).map(|p| p.fx.clone()).unwrap_or_default();
+                    seen.store(fx_link.publish(chain), Ordering::Relaxed);
                     setter.begin_set_parameter(&host_params.preset);
                     setter.set_parameter(&host_params.preset, i);
                     setter.end_set_parameter(&host_params.preset);
@@ -423,7 +465,7 @@ impl Plugin for ArchetPlugin {
         &mut self,
         _audio_io_layout: &AudioIOLayout,
         buffer_config: &BufferConfig,
-        _context: &mut impl InitContext<Self>,
+        context: &mut impl InitContext<Self>,
     ) -> bool {
         let sr = buffer_config.sample_rate;
         // Re-entrant: nice-plug calls this again from `set_state` whenever a
@@ -438,9 +480,27 @@ impl Plugin for ArchetPlugin {
                 None => return false,
             },
         }
-        self.interleaved_buf = vec![0.0f32; buffer_config.max_buffer_size as usize * 2];
+        let max_block = buffer_config.max_buffer_size as usize;
+        self.interleaved_buf = vec![0.0f32; max_block * 2];
+        self.buf_l = vec![0.0f32; max_block];
+        self.buf_r = vec![0.0f32; max_block];
+        // Built here rather than in `Default` so it never carries a
+        // placeholder rate, and re-rated in place on the second call.
+        match self.fx_chain.as_mut() {
+            Some(c) => c.prepare(sr, max_block),
+            None => self.fx_chain = Some(Chain::new(sr, max_block)),
+        }
 
         let patch = self.params.patch_state.read().map(|p| p.clone()).unwrap_or_default();
+        // A restored project brings its chain with it, inside the patch; one
+        // saved before the field existed brings an empty spec, and an empty
+        // spec leaves an empty chain.
+        if let Some(c) = self.fx_chain.as_mut() {
+            fx::apply(c, &patch.fx);
+            context.set_latency_samples(c.latency_samples() as u32);
+        }
+        self.fx_link.seed(patch.fx.clone());
+        self.fx_seen = self.fx_link.rev();
         let _ = self.command_tx.send(ArchetCommand::LoadPatch(Box::new(patch)));
         self.last_preset = self.params.preset.value();
         self.last_init_sig = None;
@@ -469,7 +529,33 @@ impl Plugin for ArchetPlugin {
                 let idx = (current_preset - 1) as usize;
                 if let Some(patch) = self.factory_presets.get(idx) {
                     let _ = tx.send(ArchetCommand::LoadPatch(Box::new(patch.clone())));
+                    // The preset's own chain, from the bank rather than from
+                    // the editor: this branch also fires on host automation.
+                    if let Some(c) = self.fx_chain.as_mut() {
+                        fx::apply(c, &patch.fx);
+                        context.set_latency_samples(c.latency_samples() as u32);
+                    }
+                    self.fx_seen = self.fx_link.publish(patch.fx.clone());
                 }
+            } else {
+                // Back to Init: the curated chain goes with the preset it
+                // came with.
+                if let Some(c) = self.fx_chain.as_mut() {
+                    fx::disengage(c);
+                    context.set_latency_samples(c.latency_samples() as u32);
+                }
+                self.fx_seen = self.fx_link.publish(ChainSpec::default());
+            }
+        }
+        // An edit made on the effects page, or a preset picked there again.
+        if let Some(c) = self.fx_chain.as_mut() {
+            let mut latency = None;
+            self.fx_link.apply_if_new(&mut self.fx_seen, |spec| {
+                fx::apply(c, spec);
+                latency = Some(c.latency_samples() as u32);
+            });
+            if let Some(l) = latency {
+                context.set_latency_samples(l);
             }
         }
 
@@ -512,20 +598,29 @@ impl Plugin for ArchetPlugin {
         }
         for s in &mut self.interleaved_buf[..interleaved_len] { *s = 0.0; }
         engine.process_audio(&mut self.interleaved_buf[..interleaved_len], 2);
+        // The chain runs in stereo before any summing: the space's width
+        // needs both channels.
+        if self.buf_l.len() < num_samples {
+            self.buf_l.resize(num_samples, 0.0);
+            self.buf_r.resize(num_samples, 0.0);
+        }
+        for i in 0..num_samples {
+            self.buf_l[i] = self.interleaved_buf[i * 2];
+            self.buf_r[i] = self.interleaved_buf[i * 2 + 1];
+        }
+        if let Some(c) = self.fx_chain.as_mut() {
+            c.process(&mut self.buf_l[..num_samples], &mut self.buf_r[..num_samples], &[], Transport::default(), Musical::default());
+        }
 
         let channel_slices = buffer.as_slice();
         if channel_slices.len() >= 2 {
             let (left, right) = channel_slices.split_at_mut(1);
-            let left  = &mut left[0];
-            let right = &mut right[0];
-            for i in 0..num_samples {
-                left[i]  = self.interleaved_buf[i * 2];
-                right[i] = self.interleaved_buf[i * 2 + 1];
-            }
+            left[0][..num_samples].copy_from_slice(&self.buf_l[..num_samples]);
+            right[0][..num_samples].copy_from_slice(&self.buf_r[..num_samples]);
         } else if !channel_slices.is_empty() {
             let mono = &mut channel_slices[0];
             for i in 0..num_samples {
-                mono[i] = (self.interleaved_buf[i * 2] + self.interleaved_buf[i * 2 + 1]) * 0.5;
+                mono[i] = (self.buf_l[i] + self.buf_r[i]) * 0.5;
             }
         }
 
@@ -595,5 +690,31 @@ mod frozen_identifiers {
         let p = ArchetParams::new(0, Arc::new(vec!["Init".to_string()]));
         assert_eq!(p.editor_state.size(), (archet_app::W as u32, archet_app::H as u32));
         assert_eq!((archet_app::W, archet_app::H), (1160.0, 770.0));
+    }
+}
+
+// -- The chain and its absence ---------------------------------------------
+#[cfg(test)]
+mod fx_chain_compat {
+    use super::*;
+
+    /// A fresh plugin holds no live chain until it is initialised, and its
+    /// persisted patch is the default one, chain included.
+    #[test]
+    fn a_fresh_plugin_persists_the_default_patch_with_its_chain() {
+        let p = ArchetPlugin::default();
+        assert!(p.fx_chain.is_none());
+        let held = p.params.patch_state.read().unwrap().fx.clone();
+        assert_eq!(held, ArchetPatch::default().fx);
+        assert_eq!(held.len(), archet::fx::FX_SLOTS);
+    }
+
+    /// Init is the absence of a factory preset: the patch it builds carries
+    /// the default chain, and `process` disengages it when the parameter
+    /// reads zero, so nothing here may depend on the chain being empty.
+    #[test]
+    fn the_init_patch_names_itself() {
+        let params = ArchetParams::default();
+        assert_eq!(params.build_init_patch().name, "Init");
     }
 }

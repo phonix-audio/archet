@@ -18,4 +18,5 @@ archet-ui       = { workspace = true }
 egui           = { workspace = true }
 serde_json     = { workspace = true }
 phonix-plugin  = { workspace = true }   # the `.vstpreset` writer + the `Preset` trait
+phonix-fx     = { workspace = true }
 phonix-rt      = { workspace = true }   # the lock-free meter channel
