@@ -230,7 +230,9 @@ impl ModalString {
     ///
     /// `fc_hz` is the fingertip's compliance, rounding the corner of the shape.
     pub fn release(&mut self, amp: f32, fc_hz: f32, f0: f32) {
-        let fc = fc_hz.max(200.0) as f64;
+        // A guard against zero only: a bass string's rounding sits below its
+        // own fundamental, and a floor here would quietly undo it.
+        let fc = fc_hz.max(1.0) as f64;
         let f0d = f0 as f64;
         // `amp` arrives on the scale a FORCE used, because that is what the
         // caller's velocity mapping is voiced in. A force reached the modal

@@ -420,6 +420,42 @@ impl ArchetVoice {
         tables[string.min(3)]
     }
 
+    /// How rounded the released shape is, per string, as the corner of the
+    /// one-pole weight `release` applies to the modes. Calibrated on the same
+    /// anechoic recordings as the decays: the corner that gives the rendered
+    /// attack, body included, the spectral centroid the recorded open string
+    /// has in its first fifty milliseconds (a hundred on cello and bass).
+    ///
+    /// It is not a finger width. An ideal triangle released at a point puts
+    /// far more energy in the upper partials than any recorded pluck, and
+    /// neither a rectangular nor a soft contact of any plausible width brings
+    /// it down: the widths those forms demand run to tens of centimetres. So
+    /// the number is what it is, the rounding a string needs, and it is
+    /// tightest where the model was brightest against the recording, the
+    /// lowest string of each instrument. Where the recording is as bright as
+    /// the model, no corner applies.
+    ///
+    /// Two places the corner cannot reach, and is not pushed: the violin's D
+    /// keeps a few decibels of excess brightness that a corner below its
+    /// fundamental would be needed to remove, so it holds the last value
+    /// that still means anything; and on the bass three strings wanted the
+    /// corner below their fundamental too, and holding it there made them
+    /// brighter still, what remained being the release scrape and the body's
+    /// own knock. The model's bass body is a violin's scaled down, with no
+    /// measurement behind the scale, and it lifts the mid-hundreds while
+    /// holding the fundamental back: that is where the bass's brightness
+    /// lives, and those three strings keep the former, uncalibrated corner
+    /// until the body is measured.
+    fn attack_corner(body_index: usize, string: usize) -> f32 {
+        const HZ: [[f32; 4]; 4] = [
+            [663.0, 353.0, 20000.0, 20000.0], // violin G D A E
+            [566.0, 1091.0, 1246.0, 1573.0],  // viola C G D A
+            [463.0, 1496.0, 2086.0, 1857.0],  // cello C G D A
+            [2276.0, 3039.0, 1593.0, 5414.0], // double bass E A D G, D alone calibrated
+        ];
+        HZ[body_index.min(3)][string.min(3)]
+    }
+
     /// Decay time at a frequency, from a measured table: straight in log
     /// frequency against log time between the points, held at the end values
     /// beyond them.
@@ -675,7 +711,7 @@ impl ArchetVoice {
             // a fifth of the open length. The spread is half a percent each
             // way, and the fraction folds about the middle, where the comb is
             // symmetric.
-            let (string, f_open, l_open) = Self::string_for(self.inst_idx, note);
+            let (string, f_open, _) = Self::string_for(self.inst_idx, note);
             self.on_string = Some((self.inst_idx, string));
             self.stopped = false;
             let spot = 0.20 * Self::freq_of(note) / f_open;
@@ -716,19 +752,10 @@ impl ArchetVoice {
             // than a force. The lowpass is the fingertip's own compliance,
             // rounding the corner of the triangle.
             let h = 5200.0f32 * (0.35 + 0.65 * self.vel);
-            // The fingertip covers a span of the string, not a point, and that
-            // span low-passes the initial shape at a corner of the wave speed
-            // over twice the span (Chadefaux, Le Carrou and Fabre, JASA 2012,
-            // eq. 10), the width of a finger in contact with a string being
-            // measured there at about two centimetres. The wave speed is twice
-            // the OPEN length times the open-string frequency, a property of
-            // the string and not of the note, so the corner is fixed in hertz
-            // on each string: a fixed harmonic rank on the open string, and a
-            // lower rank the higher a note is stopped, which is why a high
-            // stopped pizzicato is rounder than an open one. It differs between
-            // instruments because one finger spans less of a longer string.
-            const FINGER_M: f32 = 0.020;
-            let plp = l_open * f_open / FINGER_M;
+            // The rounding of the released shape, per string, calibrated on
+            // the recordings (see `attack_corner`): fixed in hertz on each
+            // string, so a note stopped higher on it is rounder still.
+            let plp = Self::attack_corner(self.inst_idx, string);
             // 116, where the force path used 0.6. A release is not quieter by
             // mistake: the bridge force sums the modes weighted by k, so the
             // old impulse drew most of its loudness from upper partials it had

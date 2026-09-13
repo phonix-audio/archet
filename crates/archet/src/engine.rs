@@ -676,32 +676,35 @@ mod profile {
         };
         let mut viola = find("Violin Pizzicato");
         viola.instrument = Instrument::Viola;
+        // every open string of every instrument, lowest first
         let cases = [
-            ("violin", find("Violin Pizzicato"), 55u8),
-            ("viola", viola, 48),
-            ("cello", find("Cello Pizzicato"), 36),
-            ("bass", find("Bass Pizzicato"), 28),
+            ("violin", find("Violin Pizzicato"), [55u8, 62, 69, 76]),
+            ("viola", viola, [48, 55, 62, 69]),
+            ("cello", find("Cello Pizzicato"), [36, 43, 50, 57]),
+            ("bass", find("Bass Pizzicato"), [28, 33, 38, 43]),
         ];
-        for (name, preset, pitch) in cases {
-            let (mut eng, tx, _mr) = ArchetEngine::new_for_plugin(sr);
-            let mut p = preset;
-            p.polyphony = 1;
-            tx.send(ArchetCommand::LoadPatch(Box::new(p))).unwrap();
-            tx.send(ArchetCommand::NoteOn(pitch, 100)).unwrap();
-            let mut out: Vec<f32> = Vec::new();
-            let mut buf = vec![0.0f32; block * 2];
-            for _ in 0..((6.0 * sr) as usize / block) {
-                buf.fill(0.0);
-                eng.process_audio(&mut buf, 2);
-                for i in 0..block {
-                    out.push(buf[i * 2]);
+        for (name, preset, opens) in cases {
+            for (s, &pitch) in opens.iter().enumerate() {
+                let (mut eng, tx, _mr) = ArchetEngine::new_for_plugin(sr);
+                let mut p = preset.clone();
+                p.polyphony = 1;
+                tx.send(ArchetCommand::LoadPatch(Box::new(p))).unwrap();
+                tx.send(ArchetCommand::NoteOn(pitch, 100)).unwrap();
+                let mut out: Vec<f32> = Vec::new();
+                let mut buf = vec![0.0f32; block * 2];
+                for _ in 0..((6.0 * sr) as usize / block) {
+                    buf.fill(0.0);
+                    eng.process_audio(&mut buf, 2);
+                    for i in 0..block {
+                        out.push(buf[i * 2]);
+                    }
                 }
+                let peak = out.iter().fold(0.0f32, |m, x| m.max(x.abs()));
+                println!("  {name:<7} string {s} note {pitch:>3}  peak {peak:.4}");
+                write_wav(&format!("/tmp/archet_pizz_family_{name}_{s}.wav"), &out, sr);
             }
-            let peak = out.iter().fold(0.0f32, |m, x| m.max(x.abs()));
-            println!("  {name:<7} note {pitch:>3}  peak {peak:.4}");
-            write_wav(&format!("/tmp/archet_pizz_family_{name}.wav"), &out, sr);
         }
-        println!("wrote /tmp/archet_pizz_family_{{violin,viola,cello,bass}}.wav");
+        println!("wrote /tmp/archet_pizz_family_{{violin,viola,cello,bass}}_{{0..3}}.wav");
     }
 
     /// Whether the pluck position really moves from one note to the next.
@@ -1156,8 +1159,6 @@ mod profile {
             [&[41], &[34], &[38], &[36]],
         ];
         const CB_16: [&[u8]; 4] = [&[45], &[38], &[45], &[33]];
-        // piano, with the hairpin swelling through bars five to eight
-        const VEL: [u8; 16] = [72, 72, 72, 72, 74, 80, 86, 78, 72, 72, 72, 72, 74, 80, 86, 78];
         let desks: [(&[[&[u8]; 4]; 8], &[&[u8]; 4]); 5] = [
             (&VLN1, &VLN1_16),
             (&VLN2, &VLN2_16),
@@ -1165,23 +1166,56 @@ mod profile {
             (&VLC, &VLC_16),
             (&CB, &CB_16),
         ];
-        // A plucked note has nothing to hold: the passage is pizzicato
-        // sempre and detached, so each eighth is written a quarter of a beat
-        // long and the hand mutes it well before the next.
-        const HELD: f32 = 0.25;
+        // The performance, kept apart from the notes. The dynamic follows the
+        // hairpins, piano rising through bars five to eight and thirteen to
+        // sixteen; the first beat of each bar leans and the third a little;
+        // the tune sits over its accompaniment and the bass under it. And no
+        // attack lands on the grid: within one player the onsets spread by
+        // some ten milliseconds, and between the players of an ensemble by a
+        // few tens (Rasch, Synchronization in performed ensemble music,
+        // Acustica 43, 1979), the desks lagging the leader by fixed amounts.
+        // A double stop is one gesture, so both its notes move together. The
+        // draws are seeded, so the passage renders the same every time.
+        const DYN: [i32; 16] = [62, 62, 62, 62, 66, 76, 86, 76, 62, 62, 62, 62, 66, 76, 86, 82];
+        const LEAN: [i32; 4] = [6, -2, 2, -2];
+        const VOICE: [i32; 5] = [6, 0, 0, 0, -2];
+        const DESK_LAG_MS: [f32; 5] = [0.0, 9.0, 13.0, 16.0, 19.0];
+        const PLAYER_SPREAD_S: f32 = 0.030;
+        // Each eighth is held to the next: a plucked note rings until the
+        // next one is taken, and the hand mutes it as that one sounds.
+        const HELD: f32 = 0.5;
+        let bpm = 172.0f32;
+        let beat = 60.0 / bpm;
+        let mut seed: u32 = 0x2545_f491;
+        let mut draw = move || -> f32 {
+            let mut g = 0.0f32;
+            for _ in 0..3 {
+                seed ^= seed << 13;
+                seed ^= seed >> 17;
+                seed ^= seed << 5;
+                g += (seed as f32 / u32::MAX as f32) * 2.0 - 1.0;
+            }
+            g / 3.0
+        };
         let mut s = Vec::new();
         for (desk, (bars, last)) in desks.iter().enumerate() {
             for bar in 1..=16usize {
                 let slots: &[&[u8]; 4] = if bar == 16 { last } else { &bars[(bar - 1) % 8] };
                 for (slot, ps) in slots.iter().enumerate() {
-                    let on = (bar - 1) as f32 * 2.0 + slot as f32 * 0.5;
+                    if ps.is_empty() {
+                        continue;
+                    }
+                    let grid = (bar - 1) as f32 * 2.0 + slot as f32 * 0.5;
+                    let late = (DESK_LAG_MS[desk] / 1000.0 + draw() * PLAYER_SPREAD_S) / beat;
+                    let on = (grid + late).max(0.0);
+                    let vel = (DYN[bar - 1] + LEAN[slot] + VOICE[desk]).clamp(1, 127) as u8;
                     for &p in ps.iter() {
-                        s.push((desk, on, p, VEL[bar - 1], HELD));
+                        s.push((desk, on, p, vel, HELD));
                     }
                 }
             }
         }
-        (172.0, s)
+        (bpm, s)
     }
 
     /// Whether a finger landing on a string ends the note still ringing on it.
@@ -1975,6 +2009,6 @@ mod golden_audio {
             }
         }
         eprintln!("GOLDEN = {h:#018x}");
-        assert_eq!(h, 0x06a6_395d_4606_cf8f, "the engine's rendered audio changed");
+        assert_eq!(h, 0x73c9_055c_ab72_af64, "the engine's rendered audio changed");
     }
 }
