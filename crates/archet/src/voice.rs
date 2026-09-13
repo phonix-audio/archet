@@ -709,7 +709,7 @@ impl ArchetVoice {
             || (detune - self.body_detune).abs() > 1e-9
             || (patch.bridge_hill_db - self.body_bridge).abs() > 1e-9
         {
-            self.body = ModalBody::new(self.sr, self.inst_idx, detune, patch.bridge_hill_db);
+            self.body.rebuild(self.sr, self.inst_idx, detune, patch.bridge_hill_db);
             self.body_inst = self.inst_idx;
             self.body_detune = detune;
             self.body_bridge = patch.bridge_hill_db;

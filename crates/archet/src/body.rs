@@ -112,6 +112,11 @@ const SIG_VIOLIN: &[(f32, f32, f32)] = &[
 const BANK_Q: f32 = 45.0;
 const BANK_OVERLAP: f32 = 1.5;
 
+/// The most resonators a body holds: signature modes plus the bank from
+/// the lowest bank start to the band ceiling at the widest overlap, with
+/// room for the per-voice detune.
+const MAX_MODES: usize = 512;
+
 /// One instrument's body: its measured signature modes, and the envelope the
 /// statistical bank above them is built against. Nothing here is a scaled
 /// violin. Frequencies are the published measurements cited on each table;
@@ -295,11 +300,25 @@ impl ModalBody {
     /// `inst` body index (0 violin..3 bass); `detune` per-voice freq multiplier;
     /// `bridge_hill_db` the bridge-hill presence (the brilliance/projection formant).
     pub fn new(fs: f32, inst: usize, detune: f32, bridge_hill_db: f32) -> Self {
+        let mut body = Self {
+            hp: Biquad::highpass(fs, 100.0, 0.7),
+            res: Vec::with_capacity(MAX_MODES),
+            lp: Biquad::lowpass(fs, 4000.0, 0.7),
+            norm: 1.0,
+        };
+        body.rebuild(fs, inst, detune, bridge_hill_db);
+        body
+    }
+
+    /// Lay the body out afresh for an instrument, a per-voice detune and a
+    /// bridge hill, in place: no allocation, so a note can call it.
+    pub fn rebuild(&mut self, fs: f32, inst: usize, detune: f32, bridge_hill_db: f32) {
         let s = spec(inst);
         let hill_f = s.hill_f * detune;
         let hill_db = bridge_hill_db.max(5.0) * s.hill_gain;
         let nyq = fs * 0.45;
-        let mut res: Vec<(Biquad, f32)> = Vec::new();
+        let res = &mut self.res;
+        res.clear();
         // (a) the instrument's own signature modes, measured, detuned per
         // voice so no two players share a body.
         for &(f, q, g) in s.sig {
@@ -350,7 +369,10 @@ impl ModalBody {
         let lp = Biquad::lowpass(fs, lp_f, 0.7);
         // normalize so the summed bank sits at a sane level
         let gsum: f32 = res.iter().map(|(_, g)| *g).sum::<f32>().max(1e-3);
-        Self { hp, res, lp, norm: 30.0 / gsum.sqrt() }
+        debug_assert!(res.len() <= MAX_MODES, "the body bank outgrew its reserve");
+        self.hp = hp;
+        self.lp = lp;
+        self.norm = 30.0 / gsum.sqrt();
     }
 
     #[inline]
