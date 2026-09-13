@@ -572,7 +572,7 @@ mod preset_sweep_tests {
             left.extend(buf.iter().step_by(2));
         }
         let h = crate::fingerprint::of(&left);
-        const GOLDEN: u64 = 10748890061394581662; // the ensemble render, note-offs included
+        const GOLDEN: u64 = 1388440266038546482; // the ensemble render, note-offs included
         assert_eq!(h, GOLDEN, "Archet ensemble render drifted from golden (hash {h:#018x})");
     }
 }
@@ -2347,6 +2347,6 @@ mod golden_audio {
         }
         let h = crate::fingerprint::of(&left);
         eprintln!("GOLDEN = {h:#018x}");
-        assert_eq!(h, 0xa8c2_ea97_ff2e_fa30, "the engine's rendered audio changed");
+        assert_eq!(h, 0x0a5f_b568_e541_2606, "the engine's rendered audio changed");
     }
 }

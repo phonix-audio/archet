@@ -354,6 +354,7 @@ impl ArchetPatch {
             .into_iter()
             .map(|mut p| {
                 p.fx = crate::fx::chain(crate::fx::space_for(&p));
+                p.output_level = PRESET_LEVEL;
                 p
             })
             .collect()
@@ -413,6 +414,11 @@ impl ArchetPatch {
         ]
     }
 }
+
+/// The output level every factory preset ships at. The engine's own
+/// headroom keeps an eight-voice chord at full velocity under full scale
+/// with no chain in the way; a preset carries a ceiling, so it sits higher.
+pub const PRESET_LEVEL: f32 = 1.4;
 
 impl phonix_plugin::preset::Preset for ArchetPatch {
     fn preset_name(&self) -> &str { &self.name }

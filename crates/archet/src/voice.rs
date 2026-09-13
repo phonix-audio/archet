@@ -40,6 +40,12 @@ impl Noise {
 const PRESS_SOFT: f32 = 2.0;
 const PRESS_LOUD: f32 = 4.0;
 
+/// The bowed bridge force's share of the working level: with the force in
+/// its window a voice carries a full Helmholtz amplitude, and one voice at
+/// full velocity must peak where the engine's voice-sum norm leaves an
+/// eight-voice chord under full scale.
+const BOW_LEVEL: f32 = 0.5;
+
 /// The bow speed range over the whole velocity range, in dB: a violin's
 /// dynamic range from its softest to its loudest (Meyer, Acoustics and the
 /// Performance of Music, about 25 dB; the anechoic recordings put 16 dB
@@ -505,13 +511,18 @@ impl ArchetVoice {
     }
     /// The instruments' relative levels: the melody instruments forward,
     /// the bass instruments back.
+    /// The four instruments at the same loudness: a violin, a viola, a
+    /// cello and a double bass play at comparable sound levels (Meyer,
+    /// Acoustics and the Performance of Music), and a desk's balance is
+    /// the player's level control, not the instrument's. The figures undo
+    /// what each measured body takes from the string's level, so a note at
+    /// the same velocity reads the same on each.
     fn inst_level(idx: usize) -> f32 {
-        let low = 1.0f32;
         match idx {
-            0 => 1.40,        // violin: figuration/melody well forward
-            1 => 0.70,        // viola
-            2 => 0.34 * low,  // cello
-            _ => 0.18 * low,  // contrabass: support, well back
+            0 => 1.00,
+            1 => 0.97,
+            2 => 1.45,
+            _ => 2.85,
         }
     }
     /// The share of samples the bowed string spent slipping since the last
@@ -1154,7 +1165,7 @@ impl ArchetVoice {
             // the string and decelerating.
             self.modal.release_damp =
                 if self.releasing && self.stroke < 0.12 { self.modal_release_factor } else { 1.0 };
-            self.modal.process(self.bow_vel, fb) * self.modal_gain * self.modal_pitch_gain
+            self.modal.process(self.bow_vel, fb) * self.modal_gain * BOW_LEVEL * self.modal_pitch_gain
         };
 
         // Bow scratch noise, bandpassed (one-pole HP via diff of LP), injected
