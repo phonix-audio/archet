@@ -84,7 +84,9 @@ impl Biquad {
 ///       (deterministic) so the response is jagged not comb-like, Q 35-55, gains
 ///       jittered, valleys only ~12-15 dB deep (overlapping skirts), shaped by the
 ///       broad BRIDGE HILL (~2.4 kHz) and a -12 dB/oct roll-off above ~3 kHz.
-/// Whole pattern scales down with instrument size (viola .80, cello .45, bass .33).
+/// Each instrument has its own pattern, from its own measured modes (see the
+/// specs below): a bass is not a violin scaled down, its air resonance sits
+/// at a quarter of the violin's and its bridge hill below a kilohertz.
 /// Output = parallel SUM of the resonators (the modal admittance), not a series EQ.
 
 // Gains CALIBRATED to Dünnwald's old-Italian profile via the `dunnwald` test below:
@@ -102,6 +104,155 @@ const SIG_VIOLIN: &[(f32, f32, f32)] = &[
     (1220.0, 20.0, -8.0), // rising out of the dip
 ];
 
+/// One instrument's body: its measured signature modes, and the envelope the
+/// statistical bank above them is built against. Nothing here is a scaled
+/// violin. Frequencies are the published measurements cited on each table;
+/// levels, the hill and the roll-offs are calibrated against the spectral
+/// envelope of the same anechoic recordings the strings were calibrated on.
+struct BodySpec {
+    sig: &'static [(f32, f32, f32)], // (Hz, Q, dB)
+    bank_from: f32,
+    bank_to: f32,
+    spacing: f32,
+    bank_db: f32,
+    hill_f: f32,
+    hill_gain: f32, // on the patch's bridge-hill dB
+    roll_f: f32,
+    roll_db_oct: f32,
+    roll2_f: f32,
+    roll2_db_oct: f32,
+    hp_f: f32,
+    lp_f: f32,
+}
+
+const VIOLIN: BodySpec = BodySpec {
+    sig: SIG_VIOLIN,
+    bank_from: 1320.0,
+    bank_to: 11000.0,
+    spacing: 170.0,
+    bank_db: -4.0,
+    hill_f: 2400.0,
+    hill_gain: 0.8,
+    roll_f: 3000.0,
+    roll_db_oct: -12.0,
+    roll2_f: 4200.0,
+    roll2_db_oct: -10.0,
+    hp_f: 200.0,
+    lp_f: 4600.0,
+};
+
+// Viola: A0 measured at 208-244 Hz across five violas (Coffey 2013) and 224 Hz
+// on a sixteen-inch instrument whose next modes sit at 328, 560, 1078 and
+// 1504 Hz (Powell, UIUC REU); A1 at 390 Hz (Coffey); B1- and B1+ typically
+// near 350 and 440 Hz. A viola radiates most between 450 and 1000 Hz
+// (Leccese 2018), where a scaled violin puts its nasal dip.
+const SIG_VIOLA: &[(f32, f32, f32)] = &[
+    (224.0, 38.0, -14.0), // A0
+    (305.0, 40.0, -18.0), // CBR, unmeasured, weak
+    (350.0, 36.0, -12.0), // B1-
+    (390.0, 40.0, -12.0), // A1
+    (450.0, 42.0, -2.0),  // B1+
+    (560.0, 30.0, 4.0),   // the strong mode above B1+
+    (720.0, 24.0, -2.0),
+    (950.0, 22.0, 0.0),   // air modes near 950-995 Hz
+    (1078.0, 20.0, 0.0),
+    (1504.0, 20.0, 2.0),
+];
+const VIOLA: BodySpec = BodySpec {
+    sig: SIG_VIOLA,
+    bank_from: 1300.0,
+    bank_to: 11000.0,
+    spacing: 150.0,
+    bank_db: -2.0,
+    hill_f: 1900.0,
+    hill_gain: 0.4,
+    roll_f: 2000.0,
+    roll_db_oct: -14.0,
+    roll2_f: 2400.0,
+    roll2_db_oct: -16.0,
+    hp_f: 300.0,
+    lp_f: 3700.0,
+};
+
+// Cello: A0 90-104 Hz, Q about 17; B1- (T1) 144-168 Hz, Q 23-37; CBR about
+// 170; C4 195; A1 203; B1+ 219; A3 277; A2 302 Hz (Bynum and Rossing, The
+// Science of String Instruments ch. 14, table 14.2; Firth, STL-QPSR 1974).
+// The bridge hill lies between 1 and 2.5 kHz and is less prominent than the
+// violin's (Askenfelt, ch. 15; Woodhouse, Euphonics 5.3), the radiated
+// formant at 800-1000 Hz (Rossing, ch. 14).
+const SIG_CELLO: &[(f32, f32, f32)] = &[
+    (100.0, 20.0, 3.0),   // A0
+    (155.0, 30.0, 3.0),   // B1- (T1)
+    (170.0, 40.0, -12.0), // CBR
+    (195.0, 40.0, -6.0),  // C4
+    (203.0, 30.0, -8.0),  // A1
+    (219.0, 42.0, 4.0),   // B1+
+    (277.0, 25.0, 8.0),   // A3
+    (302.0, 25.0, 8.0),   // A2
+    (400.0, 24.0, 8.0),
+    (550.0, 22.0, 6.0),
+    (900.0, 20.0, -4.0),  // the formant
+    (1100.0, 20.0, -5.0),
+];
+const CELLO: BodySpec = BodySpec {
+    sig: SIG_CELLO,
+    bank_from: 1200.0,
+    bank_to: 8000.0,
+    spacing: 120.0,
+    bank_db: -8.0,
+    hill_f: 1500.0,
+    hill_gain: 0.5,
+    roll_f: 1800.0,
+    roll_db_oct: -12.0,
+    roll2_f: 2600.0,
+    roll2_db_oct: -14.0,
+    hp_f: 40.0,
+    lp_f: 2500.0,
+};
+
+// Double bass: A0 58-68 Hz, T1 (B1-) 82-114 Hz on four conventional basses,
+// plate modes equally spaced from 150 to 400 Hz, the lowest bridge resonance
+// near 400 Hz, a maximum near 600 Hz and a rapid roll-off above it; the
+// bridge hill at 500-1000 Hz (Askenfelt, Eigenmodes and tone quality of the
+// double bass, STL-QPSR 1982; Askenfelt, The Science of String Instruments
+// ch. 15; Fletcher and Rossing sec. 10.11). Played, a bass radiates most
+// below 120 Hz (Leccese 2018).
+const SIG_BASS: &[(f32, f32, f32)] = &[
+    (65.0, 20.0, 0.0),    // A0
+    (100.0, 28.0, 8.0),   // T1 (B1-), near the open G, the maximum of the radiated sound
+    (130.0, 30.0, -10.0), // C4
+    (150.0, 25.0, -8.0),  // plate modes, equally spaced
+    (200.0, 25.0, 6.0),
+    (250.0, 25.0, 5.0),
+    (300.0, 25.0, -9.0),
+    (400.0, 22.0, -11.0), // lowest bridge resonance
+    (600.0, 20.0, -16.0), // the maximum before the roll-off
+];
+const BASS: BodySpec = BodySpec {
+    sig: SIG_BASS,
+    bank_from: 700.0,
+    bank_to: 2500.0,
+    spacing: 80.0,
+    bank_db: -20.0,
+    hill_f: 700.0,
+    hill_gain: 0.2,
+    roll_f: 800.0,
+    roll_db_oct: -18.0,
+    roll2_f: 1200.0,
+    roll2_db_oct: -12.0,
+    hp_f: 40.0,
+    lp_f: 1500.0,
+};
+
+fn spec(inst: usize) -> &'static BodySpec {
+    match inst {
+        1 => &VIOLA,
+        2 => &CELLO,
+        3 => &BASS,
+        _ => &VIOLIN,
+    }
+}
+
 /// The shape the statistical bank is built against, in dB at one frequency:
 /// the bridge hill, the two roll-offs above it, and the band limits the body
 /// radiates between. The per-mode jitter is per-voice and deliberately not
@@ -110,20 +261,17 @@ const SIG_VIOLIN: &[(f32, f32, f32)] = &[
 ///
 /// `inst` is the body index (0 violin .. 3 bass), the same one `new` takes.
 pub fn envelope_db(inst: usize, bridge_hill_db: f32, hz: f32) -> f32 {
-    let scale = match inst { 1 => 0.80, 2 => 0.45, 3 => 0.33, _ => 1.0 };
-    let hill_f = 2400.0 * scale;
-    let hill_db = bridge_hill_db.max(5.0) * 0.8;
+    let s = spec(inst);
+    let hill_db = bridge_hill_db.max(5.0) * s.hill_gain;
     let fc = hz.max(1.0);
-    let hump = hill_db * (-((fc / hill_f).log2().powi(2)) / 0.5).exp();
-    let roll = if fc > 3000.0 * scale { -12.0 * (fc / (3000.0 * scale)).log2() } else { 0.0 };
-    let roll2 = if fc > 4200.0 * scale { -10.0 * (fc / (4200.0 * scale)).log2() } else { 0.0 };
+    let hump = hill_db * (-((fc / s.hill_f).log2().powi(2)) / 0.5).exp();
+    let roll = if fc > s.roll_f { s.roll_db_oct * (fc / s.roll_f).log2() } else { 0.0 };
+    let roll2 = if fc > s.roll2_f { s.roll2_db_oct * (fc / s.roll2_f).log2() } else { 0.0 };
     // The radiation high-pass below the lowest mode, and the output roll-off
     // above the brilliance band: both one-pole-ish, drawn as such.
-    let hp_f = (200.0 * scale).clamp(30.0, 300.0);
-    let lp_f = (4600.0 * scale).clamp(1500.0, 9000.0);
-    let hp_db = -10.0 * (1.0 + (hp_f / fc).powi(4)).log10();
-    let lp_db = -10.0 * (1.0 + (fc / lp_f).powi(4)).log10();
-    -4.0 + hump + roll + roll2 + hp_db + lp_db
+    let hp_db = -10.0 * (1.0 + (s.hp_f / fc).powi(4)).log10();
+    let lp_db = -10.0 * (1.0 + (fc / s.lp_f).powi(4)).log10();
+    s.bank_db + hump + roll + roll2 + hp_db + lp_db
 }
 
 #[derive(Debug, Clone)]
@@ -139,15 +287,15 @@ impl ModalBody {
     /// `inst` body index (0 violin..3 bass); `detune` per-voice freq multiplier;
     /// `bridge_hill_db` the bridge-hill presence (the brilliance/projection formant).
     pub fn new(fs: f32, inst: usize, detune: f32, bridge_hill_db: f32) -> Self {
-        let scale = match inst { 1 => 0.80, 2 => 0.45, 3 => 0.33, _ => 1.0 } * detune;
-        let hill_f = 2400.0 * scale;
-        let hill_db = bridge_hill_db.max(5.0) * 0.8;
+        let s = spec(inst);
+        let hill_f = s.hill_f * detune;
+        let hill_db = bridge_hill_db.max(5.0) * s.hill_gain;
         let nyq = fs * 0.45;
         let mut res: Vec<(Biquad, f32)> = Vec::new();
-        // (a) signature modes: the violin corpus formants, scaled to the
-        // instrument. Every body here is a member of that family.
-        for &(f, q, g) in SIG_VIOLIN {
-            let fc = (f * scale).clamp(25.0, nyq);
+        // (a) the instrument's own signature modes, measured, detuned per
+        // voice so no two players share a body.
+        for &(f, q, g) in s.sig {
+            let fc = (f * detune).clamp(25.0, nyq);
             res.push((Biquad::bandpass(fs, fc, q), 10f32.powf(g / 20.0)));
         }
         // (b) statistical bank: dense, deterministically jittered. The seed is PER-VOICE
@@ -159,28 +307,31 @@ impl ModalBody {
             ^ detune.to_bits();
         let mut rng = || { seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5;
                            seed as f32 / u32::MAX as f32 };
-        let spacing = 170.0 * scale;
-        let mut f = 1320.0 * scale;
-        while f < nyq && f < 11000.0 {
+        let spacing = s.spacing * detune;
+        let mut f = s.bank_from * detune;
+        let roll_f = s.roll_f * detune;
+        let roll2_f = s.roll2_f * detune;
+        while f < nyq && f < s.bank_to {
             let fc = (f + (rng() - 0.5) * spacing * 0.8).clamp(25.0, nyq);
-            // envelope: broad bridge hill bump + roll-off above ~3k*scale + an EXTRA
-            // roll above ~4.2k*scale (Dünnwald clarity: the 4200-6879 band of a fine
-            // violin sits >=10 dB under the brilliance band -- no harshness) + jitter.
-            // The three terms are `envelope_db`'s, minus the band limits it draws
-            // and the per-voice jitter it cannot.
+            // envelope: the bridge hill, a roll-off above it and an extra roll
+            // higher still (on the violin, Duennwald's clarity: the band above
+            // the brilliance sits well under it), plus per-voice jitter. The
+            // three terms are `envelope_db`'s, minus the band limits it draws
+            // and the jitter it cannot.
             let hump = hill_db * (-((fc / hill_f).log2().powi(2)) / 0.5).exp();
-            let roll = if fc > 3000.0 * scale { -12.0 * (fc / (3000.0 * scale)).log2() } else { 0.0 };
-            let roll2 = if fc > 4200.0 * scale { -10.0 * (fc / (4200.0 * scale)).log2() } else { 0.0 };
-            let g_db = -4.0 + hump + roll + roll2 + (rng() - 0.5) * 8.0;
+            let roll = if fc > roll_f { s.roll_db_oct * (fc / roll_f).log2() } else { 0.0 };
+            let roll2 = if fc > roll2_f { s.roll2_db_oct * (fc / roll2_f).log2() } else { 0.0 };
+            let g_db = s.bank_db + hump + roll + roll2 + (rng() - 0.5) * 8.0;
             // Q: violin-family modes RING. They are real corpus modes, masked
             // under the bow's continuous excitation.
             let q = 35.0 + rng() * 20.0;
             res.push((Biquad::bandpass(fs, fc, q), 10f32.powf(g_db / 20.0)));
             f += spacing;
         }
-        // sub-A0 radiation high-pass (the body can't radiate below its lowest mode)
-        let hp = Biquad::highpass(fs, (200.0 * scale).clamp(30.0, 300.0), 0.7);
-        let lp_f = (4600.0 * scale).clamp(1500.0, 9000.0);
+        // radiation high-pass below the lowest mode (the body cannot radiate
+        // there), and the output roll-off above the brilliance band
+        let hp = Biquad::highpass(fs, (s.hp_f * detune).clamp(30.0, 300.0), 0.7);
+        let lp_f = (s.lp_f * detune).clamp(600.0, 9000.0);
         let lp = Biquad::lowpass(fs, lp_f, 0.7);
         // normalize so the summed bank sits at a sane level
         let gsum: f32 = res.iter().map(|(_, g)| *g).sum::<f32>().max(1e-3);
@@ -282,6 +433,15 @@ mod tests {
         let bytes: Vec<u8> = h.iter().flat_map(|x| x.to_le_bytes()).collect();
         std::fs::write("/tmp/archet_body_ir.f32", bytes).expect("write the impulse response");
         println!("  wrote /tmp/archet_body_ir.f32 ({} samples at {fs} Hz)", h.len());
+        // And every instrument's body, so each can be held against the
+        // spectral envelope its recordings have.
+        for inst in 1..4usize {
+            let mut body = ModalBody::new(fs, inst, 1.0, 9.0);
+            let h: Vec<f32> = (0..n).map(|i| body.process(if i == 0 { 1.0 } else { 0.0 })).collect();
+            let bytes: Vec<u8> = h.iter().flat_map(|x| x.to_le_bytes()).collect();
+            std::fs::write(format!("/tmp/archet_body_ir_{inst}.f32"), bytes).expect("write");
+        }
+        println!("  wrote /tmp/archet_body_ir_{{1,2,3}}.f32 (viola, cello, bass)");
     }
 }
 
