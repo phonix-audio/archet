@@ -58,6 +58,14 @@ const SPEED_RANGE_DB: f32 = 26.0;
 const VIB_PERIOD_SPREAD: f32 = 0.033;
 const VIB_EXTENT_SPREAD: f32 = 0.10;
 
+/// The share of the steady extent a vibrato has on its first cycle, the
+/// rest arriving over the next cycles; measured on four recorded held
+/// notes at stopped pitches (Philharmonia Orchestra sound samples, violin,
+/// long, arco with normal vibrato), whose first cycle spans 58, 69 and 137
+/// percent of the steady extent where it can be read, with no delay
+/// before it on any of them.
+const VIB_FIRST_CYCLE: f32 = 0.65;
+
 /// Slow intonation drift: the corner of a one-pole walk and its rms in
 /// cents for a soloist (recorded held notes move by one to three cents rms
 /// below 1.5 Hz) and for each player of a section (the time-varying part
@@ -1096,7 +1104,16 @@ impl ArchetVoice {
                 self.vib_cycle_rate = 1.0 + self.hum.next() * unit * VIB_PERIOD_SPREAD;
                 self.vib_cycle_depth = 1.0 + self.hum.next() * unit * VIB_EXTENT_SPREAD;
             }
-            let vib_env = ((self.note_time - patch.vib_delay) / 0.4).clamp(0.0, 1.0);
+            // The extent from the note's start: recorded held notes carry
+            // their first vibrato cycle within the first period at about
+            // two thirds of the steady extent and reach it within two
+            // cycles. A delay before it is the player's, and none by default.
+            let since = self.note_time - patch.vib_delay;
+            let vib_env = if since < 0.0 {
+                0.0
+            } else {
+                1.0 - (1.0 - VIB_FIRST_CYCLE) * (-(since * rate)).exp()
+            };
             let ph = self.vib_phase * std::f32::consts::TAU;
             // sine + a touch of 2nd harmonic -> the asymmetric violinist vibrato shape
             let lfo = ph.sin() + 0.13 * (ph * 2.0).sin();

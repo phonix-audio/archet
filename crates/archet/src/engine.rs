@@ -572,7 +572,7 @@ mod preset_sweep_tests {
             left.extend(buf.iter().step_by(2));
         }
         let h = crate::fingerprint::of(&left);
-        const GOLDEN: u64 = 1388440266038546482; // the ensemble render, note-offs included
+        const GOLDEN: u64 = 0x141e86a916cc5448; // the ensemble render, note-offs included
         assert_eq!(h, GOLDEN, "Archet ensemble render drifted from golden (hash {h:#018x})");
     }
 }
@@ -1564,6 +1564,40 @@ mod profile {
         println!("  (dB against the level before the second attack; columns at +150 and +300 ms)");
     }
 
+    /// The cost of the largest section: a four-note chord held on the
+    /// largest violin section, timed against the audio it renders.
+    ///   cargo test --release --lib engine::profile::section_load -- --ignored --nocapture
+    #[test]
+    #[ignore = "diagnostic - run with --ignored"]
+    fn section_load() {
+        let sr = 48_000.0_f32;
+        let block = 512usize;
+        let bank = crate::patch::ArchetPatch::factory_presets();
+        let preset = bank
+            .iter()
+            .find(|p| p.name == "Violin Section Large")
+            .expect("the bank no longer has Violin Section Large");
+        let (mut eng, tx, _mr) = ArchetEngine::new_for_plugin(sr);
+        tx.send(ArchetCommand::LoadPatch(Box::new(preset.clone()))).unwrap();
+        for n in [60u8, 64, 67, 72] {
+            tx.send(ArchetCommand::NoteOn(n, 110)).unwrap();
+        }
+        let secs = 5.0f32;
+        let blocks = (secs * sr) as usize / block;
+        let mut buf = vec![0.0f32; block * 2];
+        let t0 = std::time::Instant::now();
+        for _ in 0..blocks {
+            buf.fill(0.0);
+            eng.process_audio(&mut buf, 2);
+        }
+        let wall = t0.elapsed().as_secs_f32();
+        let lit = eng.voices.iter().filter(|v| v.is_active()).count();
+        println!(
+            "  {lit} voices lit: {secs:.1} s of audio in {wall:.2} s, {:.0} % of one core",
+            100.0 * wall / secs
+        );
+    }
+
     /// A held bowed note at three dynamics, for comparison with a recording.
     ///
     /// The solo violin patch holds a B flat on the A string, a stopped note
@@ -2347,6 +2381,6 @@ mod golden_audio {
         }
         let h = crate::fingerprint::of(&left);
         eprintln!("GOLDEN = {h:#018x}");
-        assert_eq!(h, 0x0a5f_b568_e541_2606, "the engine's rendered audio changed");
+        assert_eq!(h, 0x79021dea6c793a02, "the engine's rendered audio changed");
     }
 }

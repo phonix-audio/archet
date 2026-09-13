@@ -24,8 +24,12 @@ a measurement, and what has been tried.
   sharpens the corner (Smith and Woodhouse 2000; Woodhouse 2003), not a
   force-dependent filter.
 - The bowed string has one transverse plane; the plucked one has two.
-- The vibrato fades in over a fixed 0.4 s after a fixed delay; the onset of
-  a real vibrato was not measured.
+- The vibrato's onset was measured on four recorded held notes of one
+  player (2026-09-13): the first cycle is there within the first period
+  at about two thirds of the steady extent, and the extent is full within
+  two cycles. The model follows that; a published figure for the violin
+  was not found (the literature measures rate and extent, and the onset
+  of singers).
 
 ## Plucked
 
@@ -58,6 +62,10 @@ a measurement, and what has been tried.
   sits some 30 dB under the notes.
 
 ## Plugin
+
+- The largest section, thirty-two voices holding a chord, costs about two
+  thirds of one core at 48 kHz in a release build (2026-09-13); two such
+  instances do not fit on one core.
 
 - On Linux the plugin pins its own library in memory at first
   instantiation (RTLD_NODELETE), because the wrapper installs a global

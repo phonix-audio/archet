@@ -268,7 +268,7 @@ impl Default for ArchetPatch {
             release: 0.12,
             vib_rate: 5.8,
             vib_depth: 14.0,
-            vib_delay: 0.25,
+            vib_delay: 0.0,
             output_level: 0.9,
             vel_sens: 0.3,
             tune_cents: 0.0,

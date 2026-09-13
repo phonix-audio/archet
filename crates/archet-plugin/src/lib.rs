@@ -248,7 +248,7 @@ impl ArchetParams {
                 .with_unit(" Hz").with_value_to_string(formatters::v2s_f32_rounded(2)),
             vib_depth: FloatParam::new("Vibrato Depth", 14.0, FloatRange::Linear { min: 0.0, max: 30.0 })
                 .with_unit(" ct").with_value_to_string(formatters::v2s_f32_rounded(1)),
-            vib_delay: FloatParam::new("Vibrato Delay", 0.25, FloatRange::Linear { min: 0.0, max: 0.8 })
+            vib_delay: FloatParam::new("Vibrato Delay", 0.0, FloatRange::Linear { min: 0.0, max: 0.8 })
                 .with_unit(" s").with_value_to_string(formatters::v2s_f32_rounded(2)),
 
             ensemble: FloatParam::new("Ensemble Players", 0.0, FloatRange::Linear { min: 0.0, max: 60.0 })
