@@ -21,6 +21,7 @@
 
 pub mod app;
 pub mod colors;
+pub mod fx_page;
 pub mod machine;
 pub mod panel_geom;
 pub mod theme;

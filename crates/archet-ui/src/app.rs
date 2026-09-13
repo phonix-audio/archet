@@ -12,7 +12,7 @@ use archet::patch::{ArchetParam, ArchetPatch, FrictionKind, Instrument};
 use archet::{ArchetCommand, ArchetMeterState};
 use phonix_plugin::preset::Preset;
 use phonix_rt::SharedReader;
-use phonix_ui::chrome::{plugin_chrome_panel, PluginChrome};
+use phonix_ui::chrome::{plugin_chrome_panel, PillEntry, PluginChrome};
 use phonix_ui::keyboard::{keyboard_ui, KeyEvent, KeyboardState, KeyboardStyle};
 use phonix_ui::preset_picker::{NamedPreset, PresetPickerState};
 use phonix_ui::widgets;
@@ -48,6 +48,11 @@ pub struct ArchetApp {
     /// Frames left before the editor will adopt the engine's patch again.
     sync_cooldown: u8,
     mirror_hold: u8,
+    /// Which page the case shows: 0 the instrument, 1 the effects.
+    tab: usize,
+    /// The effects page moved something the audio thread has not taken yet.
+    fx_dirty: bool,
+    fx_page: crate::fx_page::FxPageState,
 }
 
 impl ArchetApp {
@@ -64,6 +69,9 @@ impl ArchetApp {
             keys: KeyboardState::new(2, 4),
             sync_cooldown: 0,
             mirror_hold: 0,
+            tab: 0,
+            fx_dirty: false,
+            fx_page: Default::default(),
         }
     }
 
@@ -91,6 +99,30 @@ impl ArchetApp {
         self.wants_preset.take()
     }
 
+    /// An edit of the chain, as the effects page makes one: the chain moves
+    /// here and the plugin is told to publish it.
+    pub fn edit_fx(&mut self, f: impl FnOnce(&mut phonix_fx::ChainSpec)) {
+        f(&mut self.patch.fx);
+        self.fx_dirty = true;
+    }
+
+    /// Whether the chain moved since the plugin last asked.
+    pub fn take_fx_changed(&mut self) -> bool {
+        std::mem::take(&mut self.fx_dirty)
+    }
+
+    /// Adopt the chain the plugin is running: after a preset change, or a
+    /// restored project.
+    pub fn set_fx(&mut self, spec: phonix_fx::ChainSpec) {
+        self.patch.fx = spec;
+        self.fx_dirty = false;
+    }
+
+    /// The chain as the editor holds it.
+    pub fn fx(&self) -> &phonix_fx::ChainSpec {
+        &self.patch.fx
+    }
+
     fn send(&mut self, cmd: ArchetCommand) {
         self.sync_cooldown = 20;
         let _ = self.tx.send(cmd);
@@ -114,7 +146,13 @@ impl ArchetApp {
             self.sync_cooldown -= 1;
         } else if adopt_ok {
             if let Some(ref ep) = self.cached_meter.patch_snapshot {
+                // Everything except the chain. The engine mirrors a whole
+                // patch but runs no effects, so its copy of `fx` is stale the
+                // moment the page moves a knob; the chain travels on its own
+                // channel, `set_fx`, from the plugin that runs it.
+                let fx = std::mem::take(&mut self.patch.fx);
                 self.patch = ep.clone();
+                self.patch.fx = fx;
             }
         }
     }
@@ -149,9 +187,21 @@ impl ArchetApp {
                 theme::gradient_v(ui, full, Color32::from_rgb(26, 22, 20), Color32::from_rgb(10, 9, 8));
                 let case = Rect::from_min_max(full.min + Vec2::new(8.0, 6.0), full.max - Vec2::new(8.0, 10.0));
                 let panel = machine::case(ui, case);
-                self.draw_bow(ui, geom::tier(panel, 0));
-                self.draw_body(ui, geom::tier(panel, 1));
-                self.draw_player(ui, geom::tier(panel, 2));
+                if self.tab == 1 {
+                    // The effects take the whole case: three effects want
+                    // more than a tier could give.
+                    let page = Rect::from_min_max(
+                        Pos2::new(geom::tier(panel, 0).left(), geom::tier(panel, 0).top()),
+                        Pos2::new(geom::tier(panel, 2).right(), geom::tier(panel, 2).bottom()),
+                    );
+                    if crate::fx_page::draw(ui, page, &mut self.patch.fx, &mut self.fx_page) {
+                        self.fx_dirty = true;
+                    }
+                } else {
+                    self.draw_bow(ui, geom::tier(panel, 0));
+                    self.draw_body(ui, geom::tier(panel, 1));
+                    self.draw_player(ui, geom::tier(panel, 2));
+                }
             });
     }
 
@@ -168,6 +218,10 @@ impl ArchetApp {
             .map(|(p, c)| NamedPreset { name: &p.name, category: c.as_deref() })
             .collect();
         let status = format!("{} voices", self.cached_meter.voice_count);
+        let pills = [
+            PillEntry { label: "INSTRUMENT", selected: self.tab == 0 },
+            PillEntry { label: "EFFECTS", selected: self.tab == 1 },
+        ];
         let chrome = PluginChrome {
             title: "ARCHET",
             accent: ROSIN,
@@ -179,10 +233,13 @@ impl ArchetApp {
             // What the panel's own nameplate used to print under this bar.
             subtitle: Some("BOWED STRING"),
             patch_name: None, buttons: &[],
-            mode_pills: &[],
+            mode_pills: &pills,
             status_right: Some(&status),
         };
         let res = plugin_chrome_panel(ui, &chrome, &mut self.picker, &named);
+        if let Some(i) = res.pill_clicked {
+            self.tab = i;
+        }
         if let Some(i) = res.preset_selected {
             self.pick_preset(i);
         }
@@ -489,6 +546,37 @@ mod tests {
         assert!((app.patch.bow_force - 0.77).abs() < 1e-3);
     }
 
+    /// The engine mirror must not carry the chain back: the engine is handed
+    /// a whole patch and publishes one back, effects included, but it runs
+    /// none, and adopting its copy wholesale would put the preset's reverb
+    /// back one frame after the page changed it.
+    #[test]
+    fn the_engine_mirror_does_not_erase_an_fx_edit() {
+        let (tx, _rx) = mpsc::channel();
+        let (mut w, r) = meter_channel::<ArchetMeterState>();
+        let mut app = ArchetApp::new(tx, r);
+        let engine_patch = ArchetPatch::default();
+        assert_eq!(engine_patch.fx.slots[1].variant("type"), Some("hall"));
+        {
+            let s = w.edit();
+            s.patch_snapshot = Some(engine_patch);
+            w.publish();
+        }
+        app.set_fx(ArchetPatch::default().fx);
+        app.edit_fx(|fx| fx.slots[1].set("type", "cathedral"));
+        assert!(app.take_fx_changed());
+        app.sync_cooldown = 0;
+        app.refresh_meters(true);
+        assert_eq!(app.patch.fx.slots[1].variant("type"), Some("cathedral"), "the mirror put the preset's space back");
+    }
+
+    /// A clicked pill turns the page; the page opens on the instrument.
+    #[test]
+    fn the_editor_opens_on_the_instrument_page() {
+        let (app, _rx) = app();
+        assert_eq!(app.tab, 0);
+    }
+
     /// Look at it. Ignored because it needs a GPU (lavapipe does):
     ///   scripts/screenshots.sh
     fn page_snapshot(pluck: bool, name: &str) {
@@ -519,4 +607,27 @@ mod tests {
     #[test]
     #[ignore = "needs a rendering backend"]
     fn archet_pizzicato_snapshot() { page_snapshot(true, "archet_pizzicato"); }
+
+    /// The effects page, on the first preset's chain.
+    #[test]
+    #[ignore = "needs a rendering backend"]
+    fn archet_effects_snapshot() {
+        let (tx, _rx) = mpsc::channel();
+        let (mut w, r) = meter_channel::<ArchetMeterState>();
+        {
+            let s = w.edit();
+            s.voice_count = 3;
+            s.peak_l = 0.58;
+            s.peak_r = 0.6;
+            s.cpu_percent = 11.0;
+            w.publish();
+        }
+        let mut app = ArchetApp::new(tx, r);
+        app.pick_preset(0);
+        app.set_fx(ArchetPatch::factory_presets()[0].fx.clone());
+        app.tab = 1;
+        let mut h = harness(app);
+        h.run_steps(3);
+        h.snapshot("archet_effects");
+    }
 }

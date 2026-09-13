@@ -15,6 +15,7 @@ egui_extras = { workspace = true }
 serde       = { workspace = true }
 serde_json  = { workspace = true }
 phonix-ui    = { workspace = true }   # icons, colors, widgets, keyboard, ui_spec, preset picker/io
+phonix-fx     = { workspace = true }
 phonix-rt     = { workspace = true }   # the lock-free meter channel
 phonix-plugin = { workspace = true }   # the `Preset` trait the picker reads
 # The editor's three spec tests parse the baked `ui_specs/archet.ron` themselves.
