@@ -104,6 +104,14 @@ const SIG_VIOLIN: &[(f32, f32, f32)] = &[
     (1220.0, 15.0, 4.0),  // rising out of the dip
 ];
 
+/// The statistical bank above the signature modes: the modes' Q (the
+/// damping of a violin body's higher modes, Bissinger), and the modal
+/// overlap they are laid out at, the ratio of a mode's half-power width to
+/// the spacing, which exceeds one above about a kilohertz on a violin
+/// (Woodhouse, The acoustics of the violin: a review, 2014).
+const BANK_Q: f32 = 45.0;
+const BANK_OVERLAP: f32 = 1.5;
+
 /// One instrument's body: its measured signature modes, and the envelope the
 /// statistical bank above them is built against. Nothing here is a scaled
 /// violin. Frequencies are the published measurements cited on each table;
@@ -113,7 +121,7 @@ struct BodySpec {
     sig: &'static [(f32, f32, f32)], // (Hz, Q, dB)
     bank_from: f32,
     bank_to: f32,
-    spacing: f32,
+    level_spacing: f32, // the spacing bank_db was calibrated at
     bank_db: f32,
     hill_f: f32,
     hill_gain: f32, // on the patch's bridge-hill dB
@@ -129,8 +137,8 @@ const VIOLIN: BodySpec = BodySpec {
     sig: SIG_VIOLIN,
     bank_from: 1320.0,
     bank_to: 11000.0,
-    spacing: 170.0,
-    bank_db: -3.0,
+    level_spacing: 170.0,
+    bank_db: -9.0,
     hill_f: 2800.0,
     hill_gain: 0.5,
     roll_f: 3600.0,
@@ -162,7 +170,7 @@ const VIOLA: BodySpec = BodySpec {
     sig: SIG_VIOLA,
     bank_from: 1300.0,
     bank_to: 11000.0,
-    spacing: 150.0,
+    level_spacing: 150.0,
     bank_db: -2.0,
     hill_f: 1900.0,
     hill_gain: 0.4,
@@ -198,7 +206,7 @@ const CELLO: BodySpec = BodySpec {
     sig: SIG_CELLO,
     bank_from: 1200.0,
     bank_to: 8000.0,
-    spacing: 120.0,
+    level_spacing: 120.0,
     bank_db: -8.0,
     hill_f: 1500.0,
     hill_gain: 0.5,
@@ -232,7 +240,7 @@ const BASS: BodySpec = BodySpec {
     sig: SIG_BASS,
     bank_from: 700.0,
     bank_to: 2500.0,
-    spacing: 80.0,
+    level_spacing: 80.0,
     bank_db: -20.0,
     hill_f: 700.0,
     hill_gain: 0.2,
@@ -307,11 +315,15 @@ impl ModalBody {
             ^ detune.to_bits();
         let mut rng = || { seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5;
                            seed as f32 / u32::MAX as f32 };
-        let spacing = s.spacing * detune;
         let mut f = s.bank_from * detune;
         let roll_f = s.roll_f * detune;
         let roll2_f = s.roll2_f * detune;
         while f < nyq && f < s.bank_to {
+            // Modes as dense as their own width times the overlap a body
+            // shows above its signature modes, so the response between
+            // them fluctuates by a few decibels rather than falling into a
+            // notch; the spacing therefore grows with frequency.
+            let spacing = f / BANK_Q / BANK_OVERLAP;
             let fc = (f + (rng() - 0.5) * spacing * 0.8).clamp(25.0, nyq);
             // envelope: the bridge hill, a roll-off above it and an extra roll
             // higher still (on the violin, Duennwald's clarity: the band above
@@ -321,10 +333,13 @@ impl ModalBody {
             let hump = hill_db * (-((fc / hill_f).log2().powi(2)) / 0.5).exp();
             let roll = if fc > roll_f { s.roll_db_oct * (fc / roll_f).log2() } else { 0.0 };
             let roll2 = if fc > roll2_f { s.roll2_db_oct * (fc / roll2_f).log2() } else { 0.0 };
-            let g_db = s.bank_db + hump + roll + roll2 + (rng() - 0.5) * 8.0;
+            // Overlapping modes add, so each mode's power is scaled by the
+            // density relative to the spacing the level was calibrated at.
+            let share_db = -10.0 * (s.level_spacing / spacing).max(1.0).log10();
+            let g_db = s.bank_db + hump + roll + roll2 + share_db + (rng() - 0.5) * 8.0;
             // Q: violin-family modes RING. They are real corpus modes, masked
             // under the bow's continuous excitation.
-            let q = 35.0 + rng() * 20.0;
+            let q = BANK_Q * (0.8 + rng() * 0.4);
             res.push((Biquad::bandpass(fs, fc, q), 10f32.powf(g_db / 20.0)));
             f += spacing;
         }
@@ -493,6 +508,6 @@ mod shared_filter_migration {
         let sig = probe();
         let mut body = ModalBody::new(48_000.0, 0, 1.0, 6.0); // violin body
         let o: Vec<f32> = sig.iter().map(|&x| body.process(x)).collect();
-        assert_eq!(hash(&o), 10096600510375938902u64, "archet ModalBody drifted");
+        assert_eq!(hash(&o), 8651240168125589848u64, "archet ModalBody drifted");
     }
 }
