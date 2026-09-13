@@ -44,6 +44,9 @@ pub struct ArchetApp {
     /// A factory preset pick pending: the editor asks, the plugin moves the
     /// parameter, and the parameter is what reaches the engine.
     wants_preset: Option<i32>,
+    /// The named fields moved in the window since the plugin last asked,
+    /// for the host's parameters to follow.
+    moved: Vec<(ArchetParam, f32)>,
     keys: KeyboardState,
     /// Frames left before the editor will adopt the engine's patch again.
     sync_cooldown: u8,
@@ -66,6 +69,7 @@ impl ArchetApp {
             presets,
             picker: PresetPickerState::default(),
             wants_preset: None,
+            moved: Vec::new(),
             keys: KeyboardState::new(2, 4),
             sync_cooldown: 0,
             mirror_hold: 0,
@@ -133,7 +137,13 @@ impl ArchetApp {
     /// sympathetic strings and re-seeds the voice pool on every drag frame.
     fn set(&mut self, param: ArchetParam, value: f32) {
         param.apply(&mut self.patch, value);
+        self.moved.push((param, value));
         self.send(ArchetCommand::SetParam { param, value });
+    }
+
+    /// The fields moved in the window since the last call.
+    pub fn take_moved(&mut self) -> Vec<(ArchetParam, f32)> {
+        std::mem::take(&mut self.moved)
     }
 
     fn refresh_meters(&mut self, adopt_ok: bool) {

@@ -317,6 +317,47 @@ impl ArchetParams {
     }
 }
 
+impl ArchetParams {
+    /// Sets the host parameter that mirrors an engine field, if one does.
+    fn follow(&self, setter: &ParamSetter, param: archet::patch::ArchetParam, value: f32) {
+        use archet::patch::ArchetParam as P;
+        let float: Option<&FloatParam> = match param {
+            P::BowPos => Some(&self.bow_pos),
+            P::BowVel => Some(&self.bow_vel),
+            P::BowForce => Some(&self.bow_force),
+            P::BowNoise => Some(&self.bow_noise),
+            P::Loss => Some(&self.loss),
+            P::BridgeHillDb => Some(&self.bridge_hill_db),
+            P::Attack => Some(&self.attack),
+            P::Release => Some(&self.release),
+            P::VelSens => Some(&self.vel_sens),
+            P::VibRate => Some(&self.vib_rate),
+            P::VibDepth => Some(&self.vib_depth),
+            P::VibDelay => Some(&self.vib_delay),
+            P::Ensemble => Some(&self.ensemble),
+            P::TuneCents => Some(&self.tune_cents),
+            _ => None,
+        };
+        if let Some(f) = float {
+            setter.begin_set_parameter(f);
+            setter.set_parameter(f, value);
+            setter.end_set_parameter(f);
+            return;
+        }
+        let int: Option<(&IntParam, i32)> = match param {
+            P::Instrument => Some((&self.instrument, value as i32)),
+            P::AutoRange => Some((&self.full_range, i32::from(value >= 0.5))),
+            P::Pluck => Some((&self.articulation, i32::from(value >= 0.5))),
+            _ => None,
+        };
+        if let Some((i, v)) = int {
+            setter.begin_set_parameter(i);
+            setter.set_parameter(i, v);
+            setter.end_set_parameter(i);
+        }
+    }
+}
+
 impl Default for ArchetParams {
     fn default() -> Self {
         Self::new(0, Arc::new(vec!["Init".to_string()]))
@@ -453,6 +494,11 @@ impl Plugin for ArchetPlugin {
                     setter.begin_set_parameter(&host_params.preset);
                     setter.set_parameter(&host_params.preset, i);
                     setter.end_set_parameter(&host_params.preset);
+                }
+                // A knob turned in the window moves the host's parameter
+                // too, so the host's own view and its automation follow.
+                for (param, value) in app.take_moved() {
+                    host_params.follow(setter, param, value);
                 }
                 if let Ok(mut p) = patch_state.write() {
                     *p = app.current_patch();
