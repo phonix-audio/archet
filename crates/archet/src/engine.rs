@@ -585,7 +585,7 @@ mod preset_sweep_tests {
             eng.process_audio(&mut buf, 2);
             for &s in &buf { h = h.rotate_left(7) ^ s.to_bits() as u64; }
         }
-        const GOLDEN: u64 = 0x803f225d02fb27aa; // the ensemble render, note-offs included
+        const GOLDEN: u64 = 0xca205778484fe870; // the ensemble render, note-offs included
         assert_eq!(h, GOLDEN, "Archet ensemble render drifted from golden (hash {h:#018x})");
     }
 }
@@ -2371,6 +2371,6 @@ mod golden_audio {
             }
         }
         eprintln!("GOLDEN = {h:#018x}");
-        assert_eq!(h, 0x4456_60ca_c42d_ece5, "the engine's rendered audio changed");
+        assert_eq!(h, 0xfd33_fb79_71d6_b428, "the engine's rendered audio changed");
     }
 }

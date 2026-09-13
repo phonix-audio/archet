@@ -93,15 +93,15 @@ impl Biquad {
 // the A band (190-650, sonority) must be STRONG, the 650-1300 band suppressed
 // (anti-nasality +4..6 dB), brilliance balanced with A, >4200 Hz well down (clarity).
 const SIG_VIOLIN: &[(f32, f32, f32)] = &[
-    (270.0, 38.0, 1.0),   // A0  main air (monopole)
-    (405.0, 40.0, -12.0), // CBR weak radiator
-    (460.0, 36.0, 3.0),   // B1- strong
-    (485.0, 40.0, -8.0),  // A1
-    (550.0, 42.0, 4.0),   // B1+ strongest
-    (640.0, 28.0, -2.0),  // transitional
-    (820.0, 24.0, -11.0), // 650-1300 nasality dip
-    (1010.0, 22.0, -12.0),// dip
-    (1220.0, 20.0, -8.0), // rising out of the dip
+    (275.0, 10.0, 6.0),   // A0  main air (monopole)
+    (405.0, 14.0, 4.0),   // CBR
+    (460.0, 16.0, 2.0),   // B1-
+    (485.0, 25.0, -8.0),  // A1
+    (550.0, 18.0, 4.0),   // B1+
+    (640.0, 20.0, -6.0),  // transitional
+    (820.0, 12.0, -3.0),  // 650-1300 nasality dip
+    (1010.0, 12.0, -3.0), // dip
+    (1220.0, 15.0, 4.0),  // rising out of the dip
 ];
 
 /// One instrument's body: its measured signature modes, and the envelope the
@@ -130,15 +130,15 @@ const VIOLIN: BodySpec = BodySpec {
     bank_from: 1320.0,
     bank_to: 11000.0,
     spacing: 170.0,
-    bank_db: -4.0,
-    hill_f: 2400.0,
-    hill_gain: 0.8,
-    roll_f: 3000.0,
-    roll_db_oct: -12.0,
+    bank_db: -3.0,
+    hill_f: 2800.0,
+    hill_gain: 0.5,
+    roll_f: 3600.0,
+    roll_db_oct: -10.0,
     roll2_f: 4200.0,
-    roll2_db_oct: -10.0,
-    hp_f: 200.0,
-    lp_f: 4600.0,
+    roll2_db_oct: -16.0,
+    hp_f: 320.0,
+    lp_f: 4200.0,
 };
 
 // Viola: A0 measured at 208-244 Hz across five violas (Coffey 2013) and 224 Hz
@@ -493,6 +493,6 @@ mod shared_filter_migration {
         let sig = probe();
         let mut body = ModalBody::new(48_000.0, 0, 1.0, 6.0); // violin body
         let o: Vec<f32> = sig.iter().map(|&x| body.process(x)).collect();
-        assert_eq!(hash(&o), 5182835411810185102u64, "archet ModalBody drifted");
+        assert_eq!(hash(&o), 10096600510375938902u64, "archet ModalBody drifted");
     }
 }
