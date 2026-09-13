@@ -43,10 +43,8 @@ impl Biquad {
         Self::coeffs(1.0 + alpha * a, -2.0 * cw, 1.0 - alpha * a, 1.0 + alpha / a, -2.0 * cw, 1.0 - alpha / a)
     }
     pub fn bandpass(fs: f32, f0: f32, q: f32) -> Self {
-        let w0 = 2.0 * PI * (f0 / fs);
-        let cw = w0.cos();
-        let alpha = w0.sin() / (2.0 * q.max(0.3));
-        Self::coeffs(alpha, 0.0, -alpha, 1.0 + alpha, -2.0 * cw, 1.0 - alpha)
+        let (b0, b2, a1, a2) = bandpass_coeffs(fs, f0, q);
+        Self(phonix_dsp::filters::BiquadT::from_coeffs(b0, 0.0, b2, 1.0, a1, a2))
     }
     pub fn lowpass(fs: f32, f0: f32, q: f32) -> Self {
         let w0 = 2.0 * PI * (f0 / fs);
@@ -61,6 +59,106 @@ impl Biquad {
         let alpha = w0.sin() / (2.0 * q.max(0.05));
         let b1 = -(1.0 + cw);
         Self::coeffs((1.0 + cw) * 0.5, b1, (1.0 + cw) * 0.5, 1.0 + alpha, -2.0 * cw, 1.0 - alpha)
+    }
+}
+
+/// RBJ bandpass coefficients normalised by a0, as (b0, b2, a1, a2); b1 is
+/// zero.
+fn bandpass_coeffs(fs: f32, f0: f32, q: f32) -> (f32, f32, f32, f32) {
+    let w0 = 2.0 * PI * (f0 / fs);
+    let cw = w0.cos();
+    let alpha = w0.sin() / (2.0 * q.max(0.3));
+    let a0 = 1.0 + alpha;
+    (alpha / a0, -alpha / a0, -2.0 * cw / a0, (1.0 - alpha) / a0)
+}
+
+/// A bank of parallel bandpass resonators, laid out one array per
+/// coefficient and per state so a sample runs every resonator in one
+/// vectorised pass. Each resonator's gain is folded into its input
+/// coefficient; b2 is minus b0 and b1 zero for a bandpass, so the two
+/// feedback coefficients are all it carries. Every array holds
+/// `MAX_MODES` from construction: a rebuild never allocates.
+#[derive(Debug, Clone)]
+struct Bank {
+    b0: Vec<f32>,
+    a1: Vec<f32>,
+    a2: Vec<f32>,
+    z1: Vec<f32>,
+    z2: Vec<f32>,
+    /// The gains, as given; the resonators carry them folded.
+    g: Vec<f32>,
+    /// Each resonator's output for the sample in hand.
+    y: Vec<f32>,
+}
+
+impl Bank {
+    fn new() -> Self {
+        let v = || Vec::with_capacity(MAX_MODES);
+        Self { b0: v(), a1: v(), a2: v(), z1: v(), z2: v(), g: v(), y: v() }
+    }
+
+    fn clear(&mut self) {
+        self.b0.clear();
+        self.a1.clear();
+        self.a2.clear();
+        self.z1.clear();
+        self.z2.clear();
+        self.g.clear();
+        self.y.clear();
+    }
+
+    fn len(&self) -> usize {
+        self.g.len()
+    }
+
+    fn push(&mut self, fs: f32, f0: f32, q: f32, gain: f32) {
+        let (b0, _, a1, a2) = bandpass_coeffs(fs, f0, q);
+        self.b0.push(b0 * gain);
+        self.a1.push(a1);
+        self.a2.push(a2);
+        self.z1.push(0.0);
+        self.z2.push(0.0);
+        self.g.push(gain);
+        self.y.push(0.0);
+    }
+
+    fn reset(&mut self) {
+        self.z1.iter_mut().for_each(|z| *z = 0.0);
+        self.z2.iter_mut().for_each(|z| *z = 0.0);
+    }
+
+    /// The gains' sum.
+    fn gain_sum(&self) -> f32 {
+        self.g.iter().sum()
+    }
+
+    /// Every resonator advanced by one sample, transposed direct form II,
+    /// and the sum of their outputs. The outputs land in an array and are
+    /// summed after: a running sum inside the loop would chain every
+    /// resonator through one addition and keep the loop scalar.
+    #[inline]
+    fn process(&mut self, x: f32) -> f32 {
+        const LANES: usize = 8;
+        let n = self.len();
+        let (b0, a1, a2) = (&self.b0[..n], &self.a1[..n], &self.a2[..n]);
+        let (z1, z2, y) = (&mut self.z1[..n], &mut self.z2[..n], &mut self.y[..n]);
+        for i in 0..n {
+            let yi = b0[i] * x + z1[i];
+            z1[i] = z2[i] - a1[i] * yi;
+            z2[i] = -(b0[i] * x) - a2[i] * yi;
+            y[i] = yi;
+        }
+        let mut acc = [0.0f32; LANES];
+        let (chunks, rest) = y.as_chunks::<LANES>();
+        for c in chunks {
+            for j in 0..LANES {
+                acc[j] += c[j];
+            }
+        }
+        for (j, v) in rest.iter().enumerate() {
+            acc[j] += v;
+        }
+        acc.iter().sum()
     }
 }
 
@@ -268,7 +366,7 @@ pub fn envelope_db(inst: usize, bridge_hill_db: f32, hz: f32) -> f32 {
 #[derive(Debug, Clone)]
 pub struct ModalBody {
     hp: Biquad,
-    res: Vec<(Biquad, f32)>, // parallel resonators (bandpass) and their gains
+    res: Bank, // parallel resonators (bandpass) and their gains
     lp: Biquad, // output roll-off above the brilliance band: the F band
     // (4200-6879) rides the mode skirts, which a per-mode gain does not reach.
     norm: f32,
@@ -280,7 +378,7 @@ impl ModalBody {
     pub fn new(fs: f32, inst: usize, detune: f32, bridge_hill_db: f32) -> Self {
         let mut body = Self {
             hp: Biquad::highpass(fs, 100.0, 0.7),
-            res: Vec::with_capacity(MAX_MODES),
+            res: Bank::new(),
             lp: Biquad::lowpass(fs, 4000.0, 0.7),
             norm: 1.0,
         };
@@ -301,7 +399,7 @@ impl ModalBody {
         // voice so no two players share a body.
         for &(f, q, g) in s.sig {
             let fc = (f * detune).clamp(25.0, nyq);
-            res.push((Biquad::bandpass(fs, fc, q), 10f32.powf(g / 20.0)));
+            res.push(fs, fc, q, 10f32.powf(g / 20.0));
         }
         // (b) the statistical bank, deterministically jittered. The seed is
         // per voice (it folds in `detune`, unique per voice) so each player's
@@ -335,7 +433,7 @@ impl ModalBody {
             let g_db = s.bank_db + hump + roll + roll2 + share_db + (rng() - 0.5) * 8.0;
             // The modes' Q, in the range measured on violin bodies.
             let q = BANK_Q * (0.8 + rng() * 0.4);
-            res.push((Biquad::bandpass(fs, fc, q), 10f32.powf(g_db / 20.0)));
+            res.push(fs, fc, q, 10f32.powf(g_db / 20.0));
             f += spacing;
         }
         // radiation high-pass below the lowest mode (the body cannot radiate
@@ -344,7 +442,7 @@ impl ModalBody {
         let lp_f = (s.lp_f * detune).clamp(600.0, 9000.0);
         let lp = Biquad::lowpass(fs, lp_f, 0.7);
         // normalize so the summed bank sits at a sane level
-        let gsum: f32 = res.iter().map(|(_, g)| *g).sum::<f32>().max(1e-3);
+        let gsum: f32 = res.gain_sum().max(1e-3);
         debug_assert!(res.len() <= MAX_MODES, "the body bank outgrew its reserve");
         self.hp = hp;
         self.lp = lp;
@@ -359,19 +457,14 @@ impl ModalBody {
     #[inline]
     pub fn process(&mut self, x: f32) -> f32 {
         let xin = self.hp.process(x);
-        let mut y = 0.0f32;
-        for (bp, g) in self.res.iter_mut() {
-            y += bp.process(xin) * *g;
-        }
+        let y = self.res.process(xin);
         self.lp.process(y * self.norm)
     }
 
     pub fn reset(&mut self) {
         self.hp.reset();
         self.lp.reset();
-        for (bp, _) in self.res.iter_mut() {
-            bp.reset();
-        }
+        self.res.reset();
     }
 }
 
