@@ -1087,20 +1087,50 @@ mod profile {
         }
     }
 
-    /// The passage `pizz_score` plays: the opening of the third movement of
-    /// Tchaikovsky's fourth symphony, Scherzo, pizzicato ostinato, bars one to
-    /// sixteen, every desk. Read off the Jurgenson-lineage full score and the
-    /// first-violin part on IMSLP and cross-checked against a Breitkopf
-    /// reprint. Two-four, F major, all five desks from the first bar,
-    /// "pizzicato sempre", piano with a swell across bars five to eight and
-    /// again across thirteen to sixteen. The public-domain scores carry no
-    /// metronome mark, so the tempo is the one editorial figure in
-    /// circulation. The double bass is written an octave above where it
-    /// sounds, and sounds here.
-    ///
-    /// Returns tempo, then one entry per note as (desk, onset in beats,
-    /// pitch, velocity, written length in beats).
-    fn score() -> (f32, Vec<(usize, f32, u8, u8, f32)>) {
+    /// How a written note is taken: plucked, a fresh or changed bow, or the
+    /// continuation of a slur.
+    #[derive(Clone, Copy, PartialEq, Debug)]
+    enum Art {
+        Pizz,
+        Arco,
+        Slur,
+    }
+
+    /// A written note: desk, onset and length in beats, written pitch.
+    #[derive(Clone, Copy, Debug)]
+    struct Written {
+        desk: usize,
+        onset: f32,
+        midi: u8,
+        len: f32,
+        art: Art,
+    }
+
+    /// A piece as written: its desks named by instrument, its notes, and its
+    /// marks as (bar, desk the mark applies to or None for all, mark).
+    struct Piece {
+        bpm: f32,
+        beats_per_bar: usize,
+        desks: Vec<String>,
+        notes: Vec<Written>,
+        marks: Vec<(usize, Option<usize>, String)>,
+    }
+
+    /// A note as played: desk, onset in beats, sounding pitch, velocity,
+    /// length in beats, and how it is taken.
+    type Played = (usize, f32, u8, u8, f32, Art);
+
+    /// The passage `score_render` plays with no file named: the opening of
+    /// the third movement of Tchaikovsky's fourth symphony, Scherzo,
+    /// pizzicato ostinato, bars one to sixteen, every desk. Read off the
+    /// Jurgenson-lineage full score and the first-violin part on IMSLP and
+    /// cross-checked against a Breitkopf reprint. Two-four, F major, all five
+    /// desks from the first bar, "pizzicato sempre", piano with a swell
+    /// across bars five to eight and again across thirteen to sixteen. The
+    /// public-domain scores carry no metronome mark, so the tempo is the one
+    /// editorial figure in circulation. The double bass is written an octave
+    /// above where it sounds, and sounds here.
+    fn score() -> Piece {
         // Four eighth slots per bar, a rest as an empty slot, a double stop
         // as two pitches. Bars nine to fifteen repeat one to seven; bar
         // sixteen is its own.
@@ -1111,7 +1141,7 @@ mod profile {
             [&[72], &[], &[72], &[74]],
             [&[72], &[74], &[72], &[74]],
             [&[72], &[74], &[72], &[77]],
-            [&[76], &[74], &[72], &[71]],
+            [&[76], &[74], &[72], &[70]],
             [&[69], &[67], &[65], &[64]],
         ];
         const VLN1_16: [&[u8]; 4] = [&[69], &[71], &[69, 76], &[]];
@@ -1133,23 +1163,23 @@ mod profile {
             [&[], &[], &[60], &[62]],
             [&[60], &[62], &[60], &[62]],
             [&[60], &[62], &[60], &[65]],
-            [&[67], &[62], &[64], &[59]],
+            [&[67], &[62], &[64], &[58]],
             [&[60], &[55], &[57], &[55]],
         ];
         const VLA_16: [&[u8]; 4] = [&[60], &[59], &[60], &[]];
         const VLC: [[&[u8]; 4]; 8] = [
-            [&[41], &[45], &[48], &[53]],
+            [&[41], &[45], &[50], &[53]],
             [&[50], &[48], &[45], &[41]],
             [&[], &[], &[53], &[50, 57]],
             [&[], &[], &[53], &[50, 57]],
-            [&[53], &[50, 57], &[53], &[50, 57]],
-            [&[53], &[50, 57], &[53], &[50, 57]],
+            [&[53, 57], &[50, 57], &[53, 57], &[50, 57]],
+            [&[53, 57], &[50, 57], &[53, 57], &[50, 57]],
             [&[60], &[53], &[57], &[50]],
             [&[53], &[46], &[50], &[48]],
         ];
         const VLC_16: [&[u8]; 4] = [&[57], &[50], &[57], &[45]];
         const CB: [[&[u8]; 4]; 8] = [
-            [&[29], &[33], &[36], &[41]],
+            [&[29], &[33], &[38], &[41]],
             [&[38], &[36], &[33], &[29]],
             [&[], &[], &[41], &[38]],
             [&[], &[], &[41], &[38]],
@@ -1166,26 +1196,160 @@ mod profile {
             (&VLC, &VLC_16),
             (&CB, &CB_16),
         ];
-        // The performance, kept apart from the notes. The dynamic follows the
-        // hairpins, piano rising through bars five to eight and thirteen to
-        // sixteen; the first beat of each bar leans and the third a little;
-        // the tune sits over its accompaniment and the bass under it. And no
-        // attack lands on the grid: within one player the onsets spread by
-        // some ten milliseconds, and between the players of an ensemble by a
-        // few tens (Rasch, Synchronization in performed ensemble music,
-        // Acustica 43, 1979), the desks lagging the leader by fixed amounts.
-        // A double stop is one gesture, so both its notes move together. The
-        // draws are seeded, so the passage renders the same every time.
-        const DYN: [i32; 16] = [62, 62, 62, 62, 66, 76, 86, 76, 62, 62, 62, 62, 66, 76, 86, 82];
-        const LEAN: [i32; 4] = [6, -2, 2, -2];
+        // Written notes as (desk, onset in eighths, written pitch, length in
+        // eighths), and the marks as (bar, mark). The bass is written an
+        // octave above where it sounds, so its written pitch is kept here and
+        // transposed with the rest. Bar fifteen closes on a B natural in the
+        // first violins and violas where bar seven had the flat.
+        let mut notes = Vec::new();
+        for (desk, (bars, last)) in desks.iter().enumerate() {
+            for bar in 1..=16usize {
+                let slots: &[&[u8]; 4] = if bar == 16 { last } else { &bars[(bar - 1) % 8] };
+                for (slot, ps) in slots.iter().enumerate() {
+                    for &p in ps.iter() {
+                        let natural = bar == 15 && slot == 3 && (desk == 0 || desk == 2);
+                        let p = if natural { p + 1 } else { p };
+                        let written = if desk == 4 { p + 12 } else { p };
+                        notes.push(Written {
+                            desk,
+                            onset: (bar as f32 - 1.0) * 2.0 + slot as f32 * 0.5,
+                            midi: written,
+                            len: 0.5,
+                            art: Art::Pizz,
+                        });
+                    }
+                }
+            }
+        }
+        let marks = [(1, "p"), (5, "<"), (7, ">"), (13, "<"), (15, ">")]
+            .iter()
+            .map(|&(b, m)| (b, None, m.to_string()))
+            .collect();
+        Piece {
+            bpm: 172.0,
+            beats_per_bar: 2,
+            desks: ["violin", "violin", "viola", "cello", "bass"].iter().map(|s| s.to_string()).collect(),
+            notes,
+            marks,
+        }
+    }
+
+    /// A piece read from files: the whole of a work rather than an excerpt.
+    ///
+    /// The directory named by ARCHET_SCORE holds three files, each with a
+    /// header line. piece.csv gives key,value lines: bpm; beats_per_bar; and
+    /// desks, the instrument of each desk in order (violin, viola, cello or
+    /// bass), which chooses the presets and the octave the bass sounds at.
+    /// notes.csv has one note per line as desk, onset in beats, written MIDI
+    /// pitch, length in beats, articulation (pizz, arco, or arco-slur for a
+    /// note continuing a slur), flag. marks.csv has one dynamic mark per
+    /// line as bar, mark; a mark written desk:mark applies to that desk only.
+    fn score_from(dir: &str) -> Piece {
+        let read = |name: &str| -> Vec<Vec<String>> {
+            let path = format!("{dir}/{name}");
+            std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("cannot read {path}: {e}"))
+                .lines()
+                .skip(1)
+                .filter(|l| !l.trim().is_empty())
+                .map(|l| l.split(',').map(|f| f.trim().to_string()).collect())
+                .collect()
+        };
+        fn field<T: std::str::FromStr>(f: &[String], i: usize) -> T {
+            f.get(i)
+                .and_then(|s| s.parse().ok())
+                .unwrap_or_else(|| panic!("malformed line {f:?}"))
+        }
+        let piece = read("piece.csv");
+        let value = |key: &str| -> Vec<String> {
+            piece
+                .iter()
+                .find(|f| f[0] == key)
+                .unwrap_or_else(|| panic!("piece.csv has no {key}"))[1..]
+                .to_vec()
+        };
+        let bpm: f32 = value("bpm")[0].parse().expect("bpm");
+        let beats_per_bar: usize = value("beats_per_bar")[0].parse().expect("beats_per_bar");
+        let desks = value("desks");
+        let mut uncertain = 0usize;
+        let notes: Vec<Written> = read("notes.csv")
+            .iter()
+            .map(|f| {
+                if f.get(5).map(|s| s.contains('?')).unwrap_or(false) {
+                    uncertain += 1;
+                }
+                let art = match f.get(4).map(String::as_str) {
+                    Some("pizz") => Art::Pizz,
+                    Some("arco") => Art::Arco,
+                    Some("arco-slur") => Art::Slur,
+                    other => panic!("unknown articulation {other:?} in {f:?}"),
+                };
+                Written { desk: field(f, 0), onset: field(f, 1), midi: field(f, 2), len: field(f, 3), art }
+            })
+            .collect();
+        let marks: Vec<(usize, Option<usize>, String)> = read("marks.csv")
+            .iter()
+            .map(|f| {
+                let m = f.get(1).cloned().unwrap_or_default();
+                match m.split_once(':') {
+                    Some((d, m)) => (field(f, 0), Some(d.parse().expect("desk of a mark")), m.to_string()),
+                    None => (field(f, 0), None, m),
+                }
+            })
+            .collect();
+        let bars = notes.iter().map(|n| (n.onset / beats_per_bar as f32) as usize + 1).max().unwrap_or(0);
+        println!(
+            "  piece from {dir}: {} desks, {} notes over {bars} bars, {} marks, {uncertain} pitches flagged uncertain",
+            desks.len(),
+            notes.len(),
+            marks.len()
+        );
+        Piece { bpm, beats_per_bar, desks, notes, marks }
+    }
+
+    /// The performance, kept apart from the notes.
+    ///
+    /// The dynamic follows the marks: a level mark sets the bar's velocity, a
+    /// hairpin or a written crescendo or diminuendo ramps bar by bar to the
+    /// next mark, and an unmarked swell rises by the amount the opening's
+    /// hairpins do; a desk with marks of its own follows those. The first
+    /// beat of each bar leans, the other beats a little, and what falls off
+    /// the beat sits back; the tune sits over its accompaniment and the bass
+    /// under it. And no attack lands on the grid: within one player the
+    /// onsets spread by some ten milliseconds, and between the players of an
+    /// ensemble by a few tens (Rasch, Synchronization in performed ensemble
+    /// music, Acustica 43, 1979), the desks lagging the leader by fixed
+    /// amounts. A double stop is one gesture, so both its notes move
+    /// together. Each note is held its written length: a plucked note rings
+    /// until the next one is taken, and the hand mutes it as that one
+    /// sounds. The draws are seeded, so the passage renders the same every
+    /// time.
+    fn perform(piece: &Piece) -> Vec<Played> {
         const VOICE: [i32; 5] = [6, 0, 0, 0, -2];
         const DESK_LAG_MS: [f32; 5] = [0.0, 9.0, 13.0, 16.0, 19.0];
         const PLAYER_SPREAD_S: f32 = 0.030;
-        // Each eighth is held to the next: a plucked note rings until the
-        // next one is taken, and the hand mutes it as that one sounds.
-        const HELD: f32 = 0.5;
-        let bpm = 172.0f32;
-        let beat = 60.0 / bpm;
+        let bpb = piece.beats_per_bar as f32;
+        let bars = piece.notes.iter().map(|n| (n.onset / bpb) as usize + 1).max().unwrap_or(0);
+        let tutti: Vec<(usize, &str)> =
+            piece.marks.iter().filter(|m| m.1.is_none()).map(|m| (m.0, m.2.as_str())).collect();
+        let own = |desk: usize| -> Vec<(usize, &str)> {
+            piece.marks.iter().filter(|m| m.1 == Some(desk)).map(|m| (m.0, m.2.as_str())).collect()
+        };
+        let curves: Vec<(Vec<i32>, Vec<bool>)> = (0..piece.desks.len())
+            .map(|d| {
+                let mine = own(d);
+                dynamics(bars, if mine.is_empty() { &tutti } else { &mine })
+            })
+            .collect();
+        for (d, (dynamic, _)) in curves.iter().enumerate() {
+            if d == 0 || !own(d).is_empty() {
+                println!(
+                    "  desk {d} dynamic by bar: {}",
+                    dynamic[1..=bars].iter().map(|v| v.to_string()).collect::<Vec<_>>().join(" ")
+                );
+            }
+        }
+        let beat = 60.0 / piece.bpm;
         let mut seed: u32 = 0x2545_f491;
         let mut draw = move || -> f32 {
             let mut g = 0.0f32;
@@ -1198,24 +1362,118 @@ mod profile {
             g / 3.0
         };
         let mut s = Vec::new();
-        for (desk, (bars, last)) in desks.iter().enumerate() {
-            for bar in 1..=16usize {
-                let slots: &[&[u8]; 4] = if bar == 16 { last } else { &bars[(bar - 1) % 8] };
-                for (slot, ps) in slots.iter().enumerate() {
-                    if ps.is_empty() {
-                        continue;
-                    }
-                    let grid = (bar - 1) as f32 * 2.0 + slot as f32 * 0.5;
-                    let late = (DESK_LAG_MS[desk] / 1000.0 + draw() * PLAYER_SPREAD_S) / beat;
-                    let on = (grid + late).max(0.0);
-                    let vel = (DYN[bar - 1] + LEAN[slot] + VOICE[desk]).clamp(1, 127) as u8;
-                    for &p in ps.iter() {
-                        s.push((desk, on, p, vel, HELD));
+        let mut gesture: Option<((usize, f32), f32)> = None;
+        for n in &piece.notes {
+            let bar = (n.onset / bpb) as usize + 1;
+            let in_bar = n.onset - (bar as f32 - 1.0) * bpb;
+            let lean = if in_bar == 0.0 {
+                6
+            } else if in_bar.fract() == 0.0 {
+                2
+            } else {
+                -2
+            };
+            let late = match gesture {
+                Some((key, l)) if key == (n.desk, n.onset) => l,
+                _ => {
+                    let l = (DESK_LAG_MS[n.desk] / 1000.0 + draw() * PLAYER_SPREAD_S) / beat;
+                    gesture = Some(((n.desk, n.onset), l));
+                    l
+                }
+            };
+            let on = (n.onset + late).max(0.0);
+            let (dynamic, accent) = &curves[n.desk];
+            let acc = if accent[bar] { 12 } else { 0 };
+            let vel = (dynamic[bar] + acc + lean + VOICE[n.desk]).clamp(1, 127) as u8;
+            let sounding = if piece.desks[n.desk] == "bass" { n.midi - 12 } else { n.midi };
+            s.push((n.desk, on, sounding, vel, n.len, n.art));
+        }
+        s
+    }
+
+    /// The velocity of each bar from a set of marks, with the bars that
+    /// carry an accent. Bars are 1-based; index 0 is unused.
+    fn dynamics(bars: usize, marks: &[(usize, &str)]) -> (Vec<i32>, Vec<bool>) {
+        const SWELL: i32 = 24;
+        let level_of = |m: &str| -> Option<i32> {
+            Some(match m {
+                "ppp" => 36,
+                "pp" => 48,
+                "p" => 62,
+                "mp" => 72,
+                "mf" => 82,
+                "f" => 92,
+                "ff" => 104,
+                "fff" => 116,
+                _ => return None,
+            })
+        };
+        let mut marks: Vec<(usize, &str)> = marks.to_vec();
+        marks.sort_by_key(|m| m.0);
+        // Level marks carry forward; a hairpin then bends the bars between
+        // itself and the next mark.
+        let mut dynamic = vec![62i32; bars + 2];
+        let mut current = 62;
+        for bar in 1..=bars {
+            for &(b, m) in &marks {
+                if b == bar {
+                    if let Some(l) = level_of(m) {
+                        current = l;
                     }
                 }
             }
+            dynamic[bar] = current;
         }
-        (bpm, s)
+        let level = dynamic.clone();
+        let mut accent = vec![false; bars + 2];
+        // A hairpin or a written crescendo or diminuendo runs from its bar to
+        // the next mark of any kind and aims at the next written level in
+        // its direction. With no such level, a rise swells by a fixed amount
+        // and a fall returns to the bar's carried level over the length of
+        // the rise it answers. An opening hairpin's bars reach the peak on
+        // its last bar; a closing one's bars step down, still above the
+        // level on its last bar, from wherever the bar before left off.
+        let mut last_rise = 1usize;
+        for (i, &(b, m)) in marks.iter().enumerate() {
+            let rising = matches!(m, "<" | "cresc");
+            let falling = matches!(m, ">" | "dim");
+            if m == "sf" {
+                if b <= bars {
+                    accent[b] = true;
+                }
+                continue;
+            }
+            if !(rising || falling) || b > bars {
+                continue;
+            }
+            let next_any = marks.get(i + 1).map(|n| n.0);
+            let next_level = marks[i + 1..]
+                .iter()
+                .find_map(|&(bb, mm)| level_of(mm).map(|l| (bb, l)));
+            let from = if rising { dynamic[b] } else { dynamic[b.max(2) - 1] };
+            // A closing hairpin glyph answers the opening one and is no
+            // longer than it; a written diminuendo runs on to the next mark.
+            let glyph_end = |n: Option<usize>| n.map_or(b + last_rise, |n| n.min(b + last_rise));
+            let (to, end) = match (rising, next_level) {
+                (true, Some((bb, l))) if l > from => (l, next_any.unwrap_or(bb)),
+                (true, _) => (from + SWELL, next_any.unwrap_or(b + 1)),
+                (false, Some((bb, l))) if l < from && m == ">" => (l, glyph_end(Some(bb))),
+                (false, Some((bb, l))) if l < from => (l, next_any.unwrap_or(bb)),
+                (false, _) => (level[b], glyph_end(next_any)),
+            };
+            let end = end.max(b + 1).min(bars + 1);
+            let span = if rising { end - b } else { end - b + 1 };
+            if rising {
+                last_rise = span;
+            }
+            for (k, bar) in (b..end).enumerate() {
+                if bar <= bars {
+                    let t = (k + 1) as f32 / span as f32;
+                    dynamic[bar] = from + ((to - from) as f32 * t).round() as i32;
+                }
+            }
+        }
+        (dynamic, accent)
     }
 
     /// Whether a finger landing on a string ends the note still ringing on it.
@@ -1319,20 +1577,24 @@ mod profile {
         println!("  (dB against the level before the second attack; columns at +150 and +300 ms)");
     }
 
-    /// A scored passage, desk by desk, on the solo plucked patches.
+    /// A scored piece, desk by desk, on the solo patches.
     ///
-    /// One engine per desk, each on its own instrument's plucked patch with a
-    /// single voice per note, and the five summed. The section patch cannot
-    /// play a tutti: each of its notes lights eight voices on a pool of
-    /// twenty-four, so three notes in it starts stealing. One player per desk
-    /// keeps every pluck clean, which is what is being judged, and the desks
-    /// sit at the balance the engine already gives each instrument. The viola
-    /// has no plucked preset of its own, so it borrows the violin's with only
-    /// the instrument changed.
-    ///   cargo test --lib engine::profile::pizz_score -- --ignored --nocapture
+    /// Each desk gets an engine on its instrument's bowed patch and one on
+    /// its plucked patch, a single voice per note, and every desk is summed.
+    /// The section patch cannot play a tutti: each of its notes lights eight
+    /// voices on a pool of twenty-four, so three notes in it starts stealing.
+    /// One player per desk keeps every note clean, which is what is being
+    /// judged, and the desks sit at the balance the engine already gives each
+    /// instrument. The viola has no plucked preset of its own, so it borrows
+    /// the violin's with only the instrument changed. A bowed note is a fresh
+    /// stroke after a rest, a bow change when it follows another note on the
+    /// desk without one, and a legato when it continues a slur. ARCHET_SCORE
+    /// names a directory holding a whole piece; unset, the opening bars
+    /// written here are played.
+    ///   cargo test --lib engine::profile::score_render -- --ignored --nocapture
     #[test]
     #[ignore = "diagnostic — run with --ignored"]
-    fn pizz_score() {
+    fn score_render() {
         use crate::patch::{ArchetPatch, Instrument};
         let sr = 48_000.0_f32;
         let block = 512usize;
@@ -1343,67 +1605,96 @@ mod profile {
                 .unwrap_or_else(|| panic!("the bank no longer has {n}"))
                 .clone()
         };
-        let violin = find("Violin Pizzicato");
-        let mut viola = violin.clone();
-        viola.instrument = Instrument::Viola;
-        viola.name = "Viola Pizzicato".into();
-        let desks: Vec<ArchetPatch> = vec![
-            violin.clone(),
-            violin,
-            viola,
-            find("Cello Pizzicato"),
-            find("Bass Pizzicato"),
-        ];
-        // desk, onset in beats, pitch, velocity, written length in beats;
-        // desks 0 violin I, 1 violin II, 2 viola, 3 cello, 4 double bass
-        let (bpm, score) = score();
-        let score = &score[..];
-        let beat = 60.0 / bpm;
+        let patches = |inst: &str| -> (ArchetPatch, ArchetPatch) {
+            match inst {
+                "violin" => (find("Violin Solo"), find("Violin Pizzicato")),
+                "viola" => {
+                    let mut pizz = find("Violin Pizzicato");
+                    pizz.instrument = Instrument::Viola;
+                    pizz.name = "Viola Pizzicato".into();
+                    (find("Viola Solo"), pizz)
+                }
+                "cello" => (find("Cello Solo"), find("Cello Pizzicato")),
+                "bass" => (find("Double Bass Solo"), find("Bass Pizzicato")),
+                other => panic!("no presets for a desk of {other}"),
+            }
+        };
+        let piece = match std::env::var("ARCHET_SCORE") {
+            Ok(dir) => score_from(&dir),
+            Err(_) => score(),
+        };
+        let mut score = perform(&piece);
+        score.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+        let beat = 60.0 / piece.bpm;
+        // One bowed and one plucked engine per desk, indexed as 2*desk and
+        // 2*desk+1.
         let mut engines = Vec::new();
-        for p in &desks {
-            let (mut eng, tx, mr) = ArchetEngine::new_for_plugin(sr);
-            tx.send(ArchetCommand::LoadPatch(Box::new(p.clone()))).unwrap();
-            let mut buf = vec![0.0f32; block * 2];
-            eng.process_audio(&mut buf, 2);
-            engines.push((eng, tx, mr));
+        for inst in &piece.desks {
+            let (arco, pizz) = patches(inst);
+            for p in [arco, pizz] {
+                let (mut eng, tx, mr) = ArchetEngine::new_for_plugin(sr);
+                tx.send(ArchetCommand::LoadPatch(Box::new(p))).unwrap();
+                let mut buf = vec![0.0f32; block * 2];
+                eng.process_audio(&mut buf, 2);
+                engines.push((eng, tx, mr));
+            }
         }
-        let end = score
-            .iter()
-            .map(|n| n.1 + n.4)
-            .fold(0.0f32, f32::max)
-            * beat
-            + 2.5;
+        let end = score.iter().map(|n| n.1 + n.4).fold(0.0f32, f32::max) * beat + 3.0;
         let mut out: Vec<f32> = Vec::new();
         let mut buf = vec![0.0f32; block * 2];
         let mut mix = vec![0.0f32; block];
-        let mut stems: Vec<Vec<f32>> = vec![Vec::new(); desks.len()];
+        let mut stems: Vec<Vec<f32>> = vec![Vec::new(); piece.desks.len()];
         let mut fired = vec![false; score.len()];
         let mut pending: Vec<(f32, usize, u8)> = Vec::new();
+        // When the last bowed note of each desk ends, in beats, so the next
+        // knows whether the bow stayed down.
+        let mut bow_up_at = vec![f32::NEG_INFINITY; piece.desks.len()];
         let mut t = 0.0f32;
+        let mut strokes = [0usize; 3];
         while t < end {
             // Releases due now go before the attacks due now: a key that
             // comes up at the same instant another goes down comes up first.
-            pending.retain(|&(when, desk, pitch)| {
+            pending.retain(|&(when, engine, pitch)| {
                 if when > t {
                     return true;
                 }
-                engines[desk].1.send(ArchetCommand::NoteOff(pitch)).unwrap();
+                engines[engine].1.send(ArchetCommand::NoteOff(pitch)).unwrap();
                 false
             });
-            for (i, &(desk, on, pitch, vel, len)) in score.iter().enumerate() {
-                if !fired[i] && on * beat <= t {
-                    engines[desk].1.send(ArchetCommand::NoteOn(pitch, vel)).unwrap();
-                    pending.push(((on + len) * beat, desk, pitch));
-                    fired[i] = true;
+            for (i, &(desk, on, pitch, vel, len, art)) in score.iter().enumerate() {
+                if fired[i] || on * beat > t {
+                    continue;
                 }
+                let engine = 2 * desk + usize::from(art == Art::Pizz);
+                let cmd = match art {
+                    Art::Pizz => ArchetCommand::NoteOn(pitch, vel),
+                    Art::Slur => {
+                        strokes[2] += 1;
+                        ArchetCommand::NoteOnLegato(pitch, vel)
+                    }
+                    Art::Arco if (on - bow_up_at[desk]).abs() * beat < 0.02 => {
+                        strokes[1] += 1;
+                        ArchetCommand::BowChange(pitch, vel)
+                    }
+                    Art::Arco => {
+                        strokes[0] += 1;
+                        ArchetCommand::NoteOn(pitch, vel)
+                    }
+                };
+                if art != Art::Pizz {
+                    bow_up_at[desk] = on + len;
+                }
+                engines[engine].1.send(cmd).unwrap();
+                pending.push(((on + len) * beat, engine, pitch));
+                fired[i] = true;
             }
             mix.iter_mut().for_each(|m| *m = 0.0);
-            for (d, (eng, _, _)) in engines.iter_mut().enumerate() {
+            for (e, (eng, _, _)) in engines.iter_mut().enumerate() {
                 buf.fill(0.0);
                 eng.process_audio(&mut buf, 2);
                 for i in 0..block {
                     mix[i] += buf[i * 2];
-                    stems[d].push(buf[i * 2]);
+                    stems[e / 2].push(buf[i * 2]);
                 }
             }
             out.extend_from_slice(&mix);
@@ -1412,18 +1703,21 @@ mod profile {
         let peak = out.iter().fold(0.0f32, |m, x| m.max(x.abs()));
         let full = out.iter().filter(|x| x.abs() >= 0.999).count();
         println!(
-            "  {} notes on {} desks, {:.1} s, peak {peak:.4}, {full} samples at full scale",
+            "  {} notes on {} desks, {:.1} s, peak {peak:.4}, {full} samples at full scale; bowed: {} fresh strokes, {} bow changes, {} slurred",
             score.len(),
-            desks.len(),
-            out.len() as f32 / sr
+            piece.desks.len(),
+            out.len() as f32 / sr,
+            strokes[0],
+            strokes[1],
+            strokes[2]
         );
-        write_wav("/tmp/archet_pizz_score.wav", &out, sr);
+        write_wav("/tmp/archet_score.wav", &out, sr);
         // Each desk on its own as well, so a fault heard in the sum can be
         // laid at one instrument's door.
         for (d, stem) in stems.iter().enumerate() {
-            write_wav(&format!("/tmp/archet_pizz_score_desk{d}.wav"), stem, sr);
+            write_wav(&format!("/tmp/archet_score_desk{d}.wav"), stem, sr);
         }
-        println!("wrote /tmp/archet_pizz_score.wav and /tmp/archet_pizz_score_desk{{0..4}}.wav");
+        println!("wrote /tmp/archet_score.wav and /tmp/archet_score_desk{{0..{}}}.wav", piece.desks.len() - 1);
     }
 
     /// Acoustic-fit harness: render the violin patch at G3/D4/A4/D5/A5 ->
