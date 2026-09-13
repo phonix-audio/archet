@@ -132,6 +132,9 @@ pub struct ArchetEngine {
     meter_counter: usize,
     peak_l: f32,
     peak_r: f32,
+    /// The share of a block's own duration the last blocks took to render,
+    /// judged on the worst of the recent past.
+    load: f32,
     patch_dirty: bool,
     // Sympathetic open-string bank (the fine-instrument "ring"): persists across
     // notes so runs leave a glowing halo. Rebuilt when the patch instrument changes.
@@ -163,6 +166,7 @@ impl ArchetEngine {
             meter_counter: 0,
             peak_l: 0.0,
             peak_r: 0.0,
+            load: 0.0,
             patch_dirty: true,
             symp: SympStrings::new(sample_rate, 0),
             symp_inst: 0,
@@ -198,6 +202,7 @@ impl ArchetEngine {
         // A body ringing down reaches denormal range in every one of its
         // resonators, and a denormal biquad costs fifty times a normal one.
         phonix_rt::denormal::enable_flush_to_zero();
+        let started = std::time::Instant::now();
         let frames = output.len() / channels.max(1);
         self.process_commands();
 
@@ -211,6 +216,7 @@ impl ArchetEngine {
             for s in output.iter_mut() {
                 *s = 0.0;
             }
+            self.measure_load(started, frames);
             self.publish_meter(frames, 0);
             return;
         }
@@ -307,7 +313,18 @@ impl ArchetEngine {
         }
 
         let vc = self.voices[..poly].iter().filter(|v| v.is_active()).count();
+        self.measure_load(started, frames);
         self.publish_meter(frames, vc);
+    }
+
+    /// The block's cost against its duration, kept as the worst of the
+    /// recent past: one slow block in a stream is heard, and a figure that
+    /// reads only the last block hides it.
+    fn measure_load(&mut self, started: std::time::Instant, frames: usize) {
+        const FORGET: f32 = 0.94;
+        let period = frames as f32 / self.sample_rate;
+        let load = started.elapsed().as_secs_f32() / period.max(1e-9);
+        self.load = load.max(self.load * FORGET);
     }
 
     fn publish_meter(&mut self, frames: usize, voice_count: usize) {
@@ -317,6 +334,7 @@ impl ArchetEngine {
             self.meter_counter = 0;
             self.meter_shadow.peak_l = self.peak_l;
             self.meter_shadow.peak_r = self.peak_r;
+            self.meter_shadow.cpu_percent = self.load * 100.0;
             self.meter_shadow.voice_count = voice_count;
             self.meter_shadow.active_notes.clone_from(&self.held_keys);
             if self.patch_dirty || self.meter_shadow.patch_snapshot.is_none() {
