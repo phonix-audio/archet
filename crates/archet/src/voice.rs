@@ -217,6 +217,11 @@ pub struct ArchetVoice {
 
 impl ArchetVoice {
     pub fn new(sr: f32, voice_idx: usize) -> Self {
+        // A player does not start the day in tune: the intonation walk
+        // begins at a draw from its own steady spread, not at zero.
+        let mut hum = Noise::new(0x1234_5678 ^ ((voice_idx as u32).wrapping_mul(40503)));
+        let pole = std::f32::consts::TAU * DRIFT_HZ * CTRL_INTERVAL as f32 / sr;
+        let drift0 = hum.next() * (pole / (2.0 - pole)).sqrt();
         Self {
             modal: ModalString::new(sr),
             modal_b: ModalString::new(sr),
@@ -241,7 +246,7 @@ impl ArchetVoice {
             noise_lp: 0.0,
             noise_bp: Biquad::bandpass(sr, 2800.0, 1.1),
             grit_bp: Biquad::bandpass(sr, 520.0, 0.9),
-            hum: Noise::new(0x1234_5678 ^ ((voice_idx as u32).wrapping_mul(40503))),
+            hum,
             bow_beta: 0.075,
             string_damping: 1.0,
             vib_cycle_rate: 1.0,
@@ -287,7 +292,7 @@ impl ArchetVoice {
             unison_pan: 0.0,
             onset_delay: 0,
             release_delay: -1,
-            drift: 0.0,
+            drift: drift0,
             note_time: 0.0,
             energy: 0.0,
             stealing: false,

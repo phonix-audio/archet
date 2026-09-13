@@ -13,11 +13,12 @@ use super::voice::{ArchetVoice, MAX_VOICES};
 
 /// Physical voices a unison ever lights, whatever section size is asked
 /// for: the number of independent players past which the richness of a
-/// section no longer grows to the ear (Ternstroem, eight to twelve). A
-/// larger section is these voices at the level of the larger section.
-/// Both `fire_unison` and the voice-sum norm need it: one to spend the
-/// voices, the other to divide by what a note actually lights.
-const PHYS_CAP: usize = 12;
+/// section no longer grows to the ear (Ternstroem, eight to twelve), at
+/// the low end so that four notes of a section hold on the pool without
+/// stealing. A larger section is these voices at the larger section's
+/// level. Both `fire_unison` and the voice-sum norm need it: one to spend
+/// the voices, the other to divide by what a note actually lights.
+const PHYS_CAP: usize = 8;
 /// The most a larger section may add over the voices that render it, in
 /// dB: the incoherent sum of its players, held within the chord headroom.
 const SECTION_GAIN_CAP_DB: f32 = 3.0;
@@ -440,8 +441,7 @@ impl ArchetEngine {
     fn fire_unison(&mut self, note: u8, vel: u8, seq: u64) {
         // `ensemble` is the section size in players. Physical voices are
         // bounded at PHYS_CAP, where the richness of independent sources
-        // saturates (Ternstroem); sizes above the cap are realized by the
-        // section diffuser at the engine output.
+        // saturates (Ternstroem); a larger section is louder, not wider.
         // A plucked section needs fewer players to read as many: their
         // attacks are already spread in time, and each note must leave the
         // pool room for the chords a pizzicato part writes.
@@ -454,21 +454,27 @@ impl ArchetEngine {
         let sd_cents = 22.0;
         let onset_max = (0.035 * self.sample_rate) as u32; // ~35 ms attack spread
         for k in 0..count {
-            // deterministic per (note, k): sum of 3 uniforms ~ Gaussian (CLT)
-            let h = (note as u32)
-                .wrapping_mul(2654435761)
-                .wrapping_add((k as u32).wrapping_mul(40503))
-                .wrapping_add(seq as u32);
-            let u = |sh: u32| ((h >> sh) & 0x3ff) as f32 / 1023.0;
-            let g = (u(0) + u(10) + u(20)) / 3.0 * 2.0 - 1.0; // ~[-1,1], bell-ish
+            // A seat's intonation is the player's: drawn from the seat and
+            // the desk's seed, the same at every note, as a sum of three
+            // uniforms for a bell-shaped spread.
+            let seat = (k as u32)
+                .wrapping_mul(40503)
+                .wrapping_add(self.patch.seed_offset.wrapping_mul(2654435761))
+                ^ 0x9E37_79B9;
+            let u = |sh: u32| ((seat >> sh) & 0x3ff) as f32 / 1023.0;
+            let g = (u(0) + u(10) + u(20)) / 3.0 * 2.0 - 1.0;
             let det = g * sd_cents * 1.7; // 1.7: map the triangular-ish range to ~SD
             // seat the players across the desk: -0.7 .. +0.7
             let pan = if count > 1 {
                 ((k as f32 / (count - 1) as f32) * 2.0 - 1.0) * 0.7
             } else { 0.0 };
-            // Onset asynchrony: player 0 lands on time; the rest up to about
-            // 28 ms late, so the section's attack is spread.
-            let onset = if k == 0 { 0 } else { ((h >> 5) % onset_max) as usize };
+            // Onset asynchrony is the note's: player 0 lands on time, the
+            // rest up to about 28 ms late, differently at each note.
+            let event = (note as u32)
+                .wrapping_mul(2654435761)
+                .wrapping_add((k as u32).wrapping_mul(40503))
+                .wrapping_add(seq as u32);
+            let onset = if k == 0 { 0 } else { ((event >> 5) % onset_max) as usize };
             let idx = self.allocate_voice_idx(note);
             self.voices[idx].set_unison(det, pan, onset);
             self.voices[idx].note_on(note, vel, &self.patch);
@@ -562,7 +568,7 @@ mod preset_sweep_tests {
             left.extend(buf.iter().step_by(2));
         }
         let h = crate::fingerprint::of(&left);
-        const GOLDEN: u64 = 0x54edad9e00966a85; // the ensemble render, note-offs included
+        const GOLDEN: u64 = 0x4b0e15ec84eb54f5; // the ensemble render, note-offs included
         assert_eq!(h, GOLDEN, "Archet ensemble render drifted from golden (hash {h:#018x})");
     }
 }
@@ -1679,6 +1685,69 @@ mod profile {
         }
     }
 
+    /// The same note three times on the section: each note's pitch band,
+    /// centre and width in cents, which a section of fixed players gives
+    /// the same each time.
+    ///   cargo test --release --lib engine::profile::section_repeat -- --ignored --nocapture
+    #[test]
+    #[ignore = "diagnostic - run with --ignored"]
+    fn section_repeat() {
+        let sr = 48_000.0_f32;
+        let block = 256usize;
+        let bank = crate::patch::ArchetPatch::factory_presets();
+        let preset = bank
+            .iter()
+            .find(|p| p.name == "Violin Section")
+            .expect("the bank no longer has Violin Section");
+        let (mut eng, tx, _mr) = ArchetEngine::new_for_plugin(sr);
+        let mut p = preset.clone();
+        p.vib_depth = 0.0;
+        tx.send(ArchetCommand::LoadPatch(Box::new(p))).unwrap();
+        let mut buf = vec![0.0f32; block * 2];
+        eng.process_audio(&mut buf, 2);
+        let mut out: Vec<f32> = Vec::new();
+        let note_len = (1.0 * sr) as usize / block;
+        let gap = (0.4 * sr) as usize / block;
+        for _ in 0..3 {
+            tx.send(ArchetCommand::NoteOn(69, 90)).unwrap();
+            for _ in 0..note_len {
+                buf.fill(0.0);
+                eng.process_audio(&mut buf, 2);
+                out.extend(buf.iter().step_by(2));
+            }
+            tx.send(ArchetCommand::NoteOff(69)).unwrap();
+            for _ in 0..gap {
+                buf.fill(0.0);
+                eng.process_audio(&mut buf, 2);
+                out.extend(buf.iter().step_by(2));
+            }
+        }
+        println!("  note   band centre (cents re 440)   width at -6 dB (cents)");
+        let period = (note_len + gap) * block;
+        for n in 0..3 {
+            let seg = &out[n * period + (0.4 * sr) as usize..n * period + (1.0 * sr) as usize];
+            let len = seg.len();
+            let mut mags = Vec::new();
+            for cents in (-120..=120).step_by(4) {
+                let f = 440.0 * 2f32.powf(cents as f32 / 1200.0);
+                let (mut re, mut im) = (0.0f64, 0.0f64);
+                for (k, &x) in seg.iter().enumerate() {
+                    let w = 0.5 - 0.5 * (std::f64::consts::TAU * k as f64 / len as f64).cos();
+                    let ph = std::f64::consts::TAU * f as f64 * k as f64 / sr as f64;
+                    re += w * x as f64 * ph.cos();
+                    im -= w * x as f64 * ph.sin();
+                }
+                mags.push((cents as f64, re * re + im * im));
+            }
+            let total: f64 = mags.iter().map(|m| m.1).sum();
+            let centre = mags.iter().map(|m| m.0 * m.1).sum::<f64>() / total.max(1e-30);
+            let peak = mags.iter().map(|m| m.1).fold(0.0, f64::max);
+            let above: Vec<f64> = mags.iter().filter(|m| m.1 >= peak * 0.25).map(|m| m.0).collect();
+            let width = above.iter().cloned().fold(f64::MIN, f64::max) - above.iter().cloned().fold(f64::MAX, f64::min);
+            println!("  {:>4}   {centre:>24.1}   {width:>22.0}", n + 1);
+        }
+    }
+
     /// A section of one, four, eight, sixteen and thirty players holding
     /// one note: level, the width of the fundamental's band, and the slow
     /// level modulation, with a file per size to hear.
@@ -2529,6 +2598,6 @@ mod golden_audio {
         }
         let h = crate::fingerprint::of(&left);
         eprintln!("GOLDEN = {h:#018x}");
-        assert_eq!(h, 0x11404189a2b3d53a, "the engine's rendered audio changed");
+        assert_eq!(h, 0xf0f90fe71d223ed9, "the engine's rendered audio changed");
     }
 }
