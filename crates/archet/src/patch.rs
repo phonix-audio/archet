@@ -237,6 +237,12 @@ pub struct ArchetPatch {
     /// constant cost adds the rest of the section (section.rs).
     #[serde(default)]
     pub ensemble: f32,
+    /// The effects the host runs after the engine: an equaliser, a space,
+    /// a ceiling, described here and run nowhere in the engine. Appended,
+    /// and empty by default, so a patch written before it existed keeps
+    /// sounding as it did: an empty chain is a real no-op.
+    #[serde(default)]
+    pub fx: phonix_fx::ChainSpec,
 }
 
 impl Default for ArchetPatch {
@@ -268,6 +274,8 @@ impl Default for ArchetPatch {
             tune_cents: 0.0,
             seed_offset: 0,
             ensemble: 0.0,
+            // The default patch is a soloist, and a soloist is heard in a chamber.
+            fx: crate::fx::chain(crate::fx::CHAMBER),
         }
     }
 }
@@ -342,6 +350,17 @@ impl ArchetPatch {
     /// bank lands when Archet ships as a standalone plugin; this is the session-
     /// integration set so a Session/`.phx` track has real starting points.
     pub fn factory_presets() -> Vec<Self> {
+        Self::bank()
+            .into_iter()
+            .map(|mut p| {
+                p.fx = crate::fx::chain(crate::fx::space_for(&p));
+                p
+            })
+            .collect()
+    }
+
+    /// The bank before each preset takes the space it is heard in.
+    fn bank() -> Vec<Self> {
         let named = |mut p: Self, n: &str| { p.name = n.into(); p };
         vec![
             // -- Solo arco -----------------------------------------------

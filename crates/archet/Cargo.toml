@@ -16,6 +16,7 @@ crate-type = ["rlib"]
 
 [dependencies]
 serde = { workspace = true }
+phonix-fx     = { workspace = true }
 # The shared crates this engine names, and no more. The paths live in the
 # workspace manifest so the SDK moves in one edit, never here.
 phonix-dsp    = { workspace = true }   # filters::BiquadT -- the modal body's biquad

@@ -11,6 +11,7 @@
 
 pub mod body;
 pub mod engine;
+pub mod fx;
 #[cfg(test)]
 pub mod fingerprint;
 pub mod friction;

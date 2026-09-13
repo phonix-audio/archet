@@ -125,6 +125,7 @@ name = "archet"
 version = "0.1.0"
 dependencies = [
  "phonix-dsp",
+ "phonix-fx",
  "phonix-music",
  "phonix-plugin",
  "phonix-rt",
@@ -142,6 +143,7 @@ dependencies = [
  "libc",
  "nice-plug",
  "nice-plug-egui",
+ "phonix-fx",
  "phonix-plugin",
  "phonix-rt",
  "serde_json",
@@ -155,6 +157,7 @@ dependencies = [
  "egui",
  "egui_extras",
  "egui_kittest",
+ "phonix-fx",
  "phonix-plugin",
  "phonix-rt",
  "phonix-ui",
@@ -2816,6 +2819,14 @@ name = "phonix-dsp"
 version = "0.3.0"
 dependencies = [
  "rustfft",
+ "serde",
+]
+
+[[package]]
+name = "phonix-fx"
+version = "0.3.0"
+dependencies = [
+ "phonix-dsp",
  "serde",
 ]
 
