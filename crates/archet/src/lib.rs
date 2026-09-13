@@ -1,7 +1,7 @@
-//! Archet — bowed-strings physical-model engine (violin / viola / cello / bass).
+//! Archet - bowed-strings physical-model engine (violin / viola / cello / bass).
 //!
 //! A dedicated digital-waveguide bowed string with a procedural modal *body*
-//! filter — the element that turns a bare string (spectrally an organ/reed) into
+//! filter - the element that turns a bare string (spectrally an organ/reed) into
 //! a recognizable violin. Built from the acoustics literature (CCRMA / IRCAM /
 //! Woodhouse); see the per-module docs and the plan's Sources for citations.
 //!

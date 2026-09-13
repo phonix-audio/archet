@@ -1,12 +1,12 @@
 //! Archet as a VST3 and CLAP plugin.
 //!
 //! Wraps the ArchetEngine in a nice-plug Plugin.
-//! No audio input — stereo synth output only. MIDI input for notes + pitch bend.
+//! No audio input - stereo synth output only. MIDI input for notes + pitch bend.
 //!
 //! Archet exposes no granular per-parameter Set commands (only SetOutputLevel,
 //! SetPolyphony and LoadPatch). So in Init mode (preset == 0) the host-automatable
 //! params are assembled into a whole `ArchetPatch` and pushed via `LoadPatch`
-//! ONLY when a value actually changed — keeping the audio thread allocation-free
+//! ONLY when a value actually changed - keeping the audio thread allocation-free
 //! when nothing is being automated.
 
 use nice_plug::prelude::*;
@@ -20,7 +20,7 @@ use archet_ui::app::{self as archet_app, ArchetApp};
 use phonix_plugin::preset::Preset;
 use phonix_plugin::vstpreset::{self, ParamValue};
 
-// ── Plugin struct ──────────────────────────────────────────────────────────
+// -- Plugin struct ----------------------------------------------------------
 
 pub struct ArchetPlugin {
     params:          Arc<ArchetParams>,
@@ -65,7 +65,7 @@ impl Default for ArchetPlugin {
     }
 }
 
-// ── Parameters ────────────────────────────────────────────────────────────
+// -- Parameters ------------------------------------------------------------
 
 #[derive(Params)]
 struct ArchetParams {
@@ -280,7 +280,7 @@ impl Default for ArchetParams {
     }
 }
 
-// ── .vstpreset generation ─────────────────────────────────────────────────
+// -- .vstpreset generation -------------------------------------------------
 
 fn map_patch_to_nih_params(patch: &ArchetPatch) -> Vec<(&'static str, ParamValue)> {
     let inst_idx = match patch.instrument {
@@ -337,7 +337,7 @@ fn generate_vstpreset_files() {
     }
 }
 
-// ── Plugin implementation ─────────────────────────────────────────────────
+// -- Plugin implementation -------------------------------------------------
 
 impl Plugin for ArchetPlugin {
     const NAME:    &'static str = "Archet";
@@ -434,7 +434,7 @@ impl Plugin for ArchetPlugin {
         let engine = match self.engine.as_mut() { Some(e) => e, None => return ProcessStatus::Normal };
         let tx     = &self.command_tx;
 
-        // ── Preset change ──
+        // -- Preset change --
         let current_preset = self.params.preset.value();
         if current_preset != self.last_preset {
             self.last_preset = current_preset;
@@ -447,7 +447,7 @@ impl Plugin for ArchetPlugin {
             }
         }
 
-        // ── Init mode: rebuild + LoadPatch only when a param changed ──
+        // -- Init mode: rebuild + LoadPatch only when a param changed --
         if current_preset == 0 {
             let sig = self.params.init_sig();
             let changed = self.last_init_sig.map_or(true, |prev| {
@@ -460,7 +460,7 @@ impl Plugin for ArchetPlugin {
             }
         }
 
-        // ── MIDI events ──
+        // -- MIDI events --
         while let Some(event) = context.next_event() {
             match event {
                 NoteEvent::NoteOn { note, velocity, .. } => {
@@ -471,14 +471,14 @@ impl Plugin for ArchetPlugin {
                     let _ = tx.send(ArchetCommand::NoteOff(note));
                 }
                 NoteEvent::MidiPitchBend { value, .. } => {
-                    let semitones = (value - 0.5) * 4.0;   // ±2 semitones
+                    let semitones = (value - 0.5) * 4.0;   // +/-2 semitones
                     let _ = tx.send(ArchetCommand::PitchBend(semitones));
                 }
                 _ => {}
             }
         }
 
-        // ── Audio ──
+        // -- Audio --
         let num_samples     = buffer.samples();
         let interleaved_len = num_samples * 2;
         if self.interleaved_buf.len() < interleaved_len {
@@ -507,7 +507,7 @@ impl Plugin for ArchetPlugin {
     }
 }
 
-// ── CLAP ──────────────────────────────────────────────────────────────────
+// -- CLAP ------------------------------------------------------------------
 
 impl ClapPlugin for ArchetPlugin {
     const CLAP_ID: &'static str = "com.phonix-audio.archet";
@@ -522,7 +522,7 @@ impl ClapPlugin for ArchetPlugin {
     const CLAP_FEATURES: &'static [ClapFeature] = &[ClapFeature::Instrument, ClapFeature::Custom("physical-modeling"), ClapFeature::Custom("strings"), ClapFeature::Stereo];
 }
 
-// ── VST3 ──────────────────────────────────────────────────────────────────
+// -- VST3 ------------------------------------------------------------------
 
 impl Vst3Plugin for ArchetPlugin {
     const VST3_CLASS_ID: [u8; 16] = *b"PxArchetBow00001";
@@ -532,7 +532,7 @@ impl Vst3Plugin for ArchetPlugin {
 nice_export_clap!(ArchetPlugin);
 nice_export_vst3!(ArchetPlugin);
 
-// ── Frozen identifiers ────────────────────────────────────────────────────
+// -- Frozen identifiers ----------------------------------------------------
 //
 // The VST3 class id, the CLAP id and the display name are WIRE FORMAT: they
 // compose the `.vstpreset` header, the DAWproject `deviceID` and the directory
@@ -541,7 +541,7 @@ nice_export_vst3!(ArchetPlugin);
 // class id against `phonix_preset::devices::plugin_for_engine(&EngineTag::Archet)`;
 // that dependency ran plugin -> phonix and now runs the other way, and the
 // `EngineTag::Archet` variant is gone. So both sides assert the same literals
-// instead, and a drift still fails a build — just two builds instead of one
+// instead, and a drift still fails a build - just two builds instead of one
 // (the sequencer's `the_extracted_class_ids_are_the_plugins_own` is the other half).
 #[cfg(test)]
 mod frozen_identifiers {

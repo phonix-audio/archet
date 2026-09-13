@@ -12,7 +12,7 @@
 
 use egui::Color32;
 
-// ── The case ─────────────────────────────────────────────────────────
+// -- The case ---------------------------------------------------------
 
 /// The panel, a graphite anodising lit from above.
 pub const PANEL_TOP:    Color32 = Color32::from_rgb(56, 53, 50);
@@ -29,7 +29,7 @@ pub const CHEEK_GRAIN:  Color32 = Color32::from_rgba_premultiplied(10, 9, 8, 44)
 pub const SILK:     Color32 = Color32::from_rgb(240, 236, 226);
 pub const SILK_DIM: Color32 = Color32::from_rgb(154, 149, 138);
 
-// ── The plates sunk into the panel ───────────────────────────────────
+// -- The plates sunk into the panel -----------------------------------
 
 pub const PLATE_TOP:    Color32 = Color32::from_rgb(31, 29, 27);
 pub const PLATE_BOTTOM: Color32 = Color32::from_rgb(20, 19, 17);
@@ -39,7 +39,7 @@ pub const PLATE_SILK_DIM: Color32 = Color32::from_rgb(138, 133, 124);
 pub const WELL:      Color32 = Color32::from_rgb(11, 11, 10);
 pub const WELL_EDGE: Color32 = Color32::from_rgb(72, 69, 64);
 
-// ── The three things the instrument is ───────────────────────────────
+// -- The three things the instrument is -------------------------------
 
 /// The bow: pale horsehair.
 pub const BOW:   Color32 = Color32::from_rgb(232, 224, 196);
@@ -64,7 +64,7 @@ pub fn dim(c: Color32) -> Color32 {
     )
 }
 
-// ── The one signal ───────────────────────────────────────────────────
+// -- The one signal ---------------------------------------------------
 
 /// Downstream of the body there is one path, whatever made it.
 pub const TRUNK:     Color32 = Color32::from_rgb(238, 226, 200);

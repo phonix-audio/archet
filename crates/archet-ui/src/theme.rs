@@ -84,7 +84,7 @@ pub fn run(ui: &Ui, pts: &[Pos2], live: bool, tint: Color32, dim_tint: Color32) 
     }
 }
 
-// ── The curves the windows draw ──────────────────────────────────────
+// -- The curves the windows draw --------------------------------------
 
 /// The body's response, as points across a window. The arithmetic is the
 /// engine's own (`archet::body::envelope_db`), so a body voiced there moves

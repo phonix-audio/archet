@@ -1,8 +1,8 @@
-//! Sympathetic open-string resonators — the fine-instrument "ring".
+//! Sympathetic open-string resonators - the fine-instrument "ring".
 //!
 //! On a real (and especially a fine old Italian) violin the un-played OPEN strings
-//! resonate sympathetically with the played notes — strongest when a note matches an
-//! open-string harmonic (G3/D4/A4/E5 on a violin) — and keep ringing between and
+//! resonate sympathetically with the played notes - strongest when a note matches an
+//! open-string harmonic (G3/D4/A4/E5 on a violin) - and keep ringing between and
 //! after notes. That persistent halo around the playing is a defining part of the
 //! "Stradivarius" glow. Modelled as four damped string loops (feedback comb with
 //! fractional delay + loop lowpass, T60 ~1.5 s) per ENGINE, fed by the summed dry

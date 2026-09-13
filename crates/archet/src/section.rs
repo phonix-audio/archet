@@ -1,14 +1,14 @@
-//! Archet SECTION model — turn the small real-voice pool into a large
+//! Archet SECTION model - turn the small real-voice pool into a large
 //! string section at fixed (size-independent) cost.
 //!
 //! Why not N physical voices: rendering 100 bowed waveguides is impossible
-//! and perceptually pointless (Ternström: independent-source richness
+//! and perceptually pointless (Ternstroem: independent-source richness
 //! saturates by ~8-12 voices). The engine renders a bounded pool of real
 //! decorrelated voices (true physical timbre + ~14-cent static F0 scatter);
 //! this module thickens it toward the large-section texture, O(1) in size.
 //!
 //! ALGORITHM = the classic string-ensemble CHORUS (Roland/ARP BBD ensemble,
-//! Solina; Dattorro "Effect Design"; Zölzer DAFX modulation chapter), NOT
+//! Solina; Dattorro "Effect Design"; Zoelzer DAFX modulation chapter), NOT
 //! an all-pass diffuser and NOT a fixed/velvet delay. Each extra "player" is
 //! a copy read from a delay line whose length is MODULATED slowly, so the
 //! copy is DOPPLER-DETUNED by a few cents -- exactly like a real player at a
@@ -60,7 +60,7 @@ impl SectionDiffuser {
             let mut inc = [0.0f32; 3];
             let mut ph = [0.0f32; 3];
             for j in 0..3 {
-                let rate = base_rates[j] * (0.8 + 0.4 * rnd()); // jitter ±20%
+                let rate = base_rates[j] * (0.8 + 0.4 * rnd()); // jitter +/-20%
                 inc[j] = std::f32::consts::TAU * rate / sr;
                 ph[j] = rnd() * std::f32::consts::TAU;
             }

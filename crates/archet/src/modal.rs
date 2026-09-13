@@ -60,7 +60,7 @@ pub struct ModalString {
     /// Samples processed and samples spent slipping since last read.
     pub steps: u32,
     pub slips: u32,
-    // ── string/fret unilateral CONTACT (slap bass, IRCAM Modalys style) ──────
+    // -- string/fret unilateral CONTACT (slap bass, IRCAM Modalys style) ------
     // A barrier placed at string fraction fret_beta. When the vibrating string
     // penetrates it, a clamp force is applied across ALL modes (coupling them -> the
     // buzzy, slightly inharmonic "growl" that colours the WHOLE slap note, not a gated

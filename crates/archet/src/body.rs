@@ -78,7 +78,7 @@ impl Biquad {
 /// Q (~25-50), and above ~1 kHz it is a STATISTICAL jagged field, not isolated peaks
 /// (Gough 2016, Woodhouse 2014, Bissinger; the "wooden" timbre IS that density). So:
 ///   (a) ~9 discrete SIGNATURE modes < ~1.3 kHz (A0/CBR/A1/B1-/B1+ ...), strong
-///       B1+/B1-/A0, weak CBR/A1, a few-dB dip through 650-1300 Hz (Dünnwald anti-
+///       B1+/B1-/A0, weak CBR/A1, a few-dB dip through 650-1300 Hz (Duennwald anti-
 ///       nasality -- the single biggest anti-reed lever);
 ///   (b) ~40 STATISTICAL modes 1.3-11 kHz, equally spaced ~170 Hz then JITTERED
 ///       (deterministic) so the response is jagged not comb-like, Q 35-55, gains
@@ -89,7 +89,7 @@ impl Biquad {
 /// at a quarter of the violin's and its bridge hill below a kilohertz.
 /// Output = parallel SUM of the resonators (the modal admittance), not a series EQ.
 
-// Gains CALIBRATED to Dünnwald's old-Italian profile via the `dunnwald` test below:
+// Gains CALIBRATED to Duennwald's old-Italian profile via the `dunnwald` test below:
 // the A band (190-650, sonority) must be STRONG, the 650-1300 band suppressed
 // (anti-nasality +4..6 dB), brilliance balanced with A, >4200 Hz well down (clarity).
 const SIG_VIOLIN: &[(f32, f32, f32)] = &[
@@ -292,7 +292,7 @@ pub struct ModalBody {
     hp: Biquad,
     res: Vec<(Biquad, f32)>, // parallel resonators (bandpass) and their gains
     lp: Biquad, // output roll-off: the F band (4200-6879) rides the mode SKIRTS, a
-    // per-mode gain roll can't reach it -- Dünnwald clarity needs this cut.
+    // per-mode gain roll can't reach it -- Duennwald clarity needs this cut.
     norm: f32,
 }
 
@@ -398,8 +398,8 @@ impl ModalBody {
 mod tests {
     use super::*;
 
-    /// Dünnwald band profile of the violin body (impulse response -> band levels).
-    /// Old-Italian targets (Dünnwald 1991 via Buen): A(190-650) strong; B(650-1300)
+    /// Duennwald band profile of the violin body (impulse response -> band levels).
+    /// Old-Italian targets (Duennwald 1991 via Buen): A(190-650) strong; B(650-1300)
     /// suppressed ~4-6 dB below A (anti-nasality, his strongest discriminator);
     /// DE(1640-4200) within ~3 dB of A (brilliance / bridge hill);
     /// clarity = DE - F(4200-6879) >= 10 dB (no harshness).
@@ -436,7 +436,7 @@ mod tests {
         let c = band(1300.0, 2580.0);
         let de = band(1640.0, 4200.0);
         let f_ = band(4200.0, 6879.0);
-        println!("DÜNNWALD bands (dB): A(190-650)={:.1} B(650-1300)={:.1} C(1300-2580)={:.1} DE(1640-4200)={:.1} F(4200-6879)={:.1}", a, b, c, de, f_);
+        println!("DUENNWALD bands (dB): A(190-650)={:.1} B(650-1300)={:.1} C(1300-2580)={:.1} DE(1640-4200)={:.1} F(4200-6879)={:.1}", a, b, c, de, f_);
         println!("  anti-nasality A-B = {:+.1} dB (want +4..+6)", a - b);
         println!("  brilliance  DE-A = {:+.1} dB (want > -3)", de - a);
         println!("  clarity     DE-F = {:+.1} dB (want >= +10)", de - f_);

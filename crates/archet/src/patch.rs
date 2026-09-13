@@ -1,4 +1,4 @@
-//! Archet patch — all tunable parameters of the bowed-string model.
+//! Archet patch - all tunable parameters of the bowed-string model.
 //!
 //! Every field carries `#[serde(default)]` so older saved patches load forward.
 //! Values are the literature-derived starting points (see module docs and the
@@ -204,7 +204,7 @@ pub struct ArchetPatch {
     pub bow_noise: f32,
 
     // --- attack / articulation ---
-    /// Bow-force ramp time at note-on (s) — the pre-Helmholtz onset.
+    /// Bow-force ramp time at note-on (s) - the pre-Helmholtz onset.
     #[serde(default)]
     pub attack: f32,
     /// Bow-lift ramp time at note-off (s).
@@ -240,7 +240,7 @@ pub struct ArchetPatch {
     pub seed_offset: u32,
     /// String-SECTION size, in PLAYERS (0 or 1 = solo). The engine renders
     /// a small bounded pool of real decorrelated voices (physical timbre +
-    /// Ternström ~14 cent F0 scatter that fills the partial band) and, above
+    /// Ternstroem ~14 cent F0 scatter that fills the partial band) and, above
     /// that pool, an O(1) decorrelating diffuser smooths toward the
     /// large-N texture -- so the cost is INDEPENDENT of the size and a "100
     /// violins" setting is feasible (see section.rs for the research basis).
@@ -354,7 +354,7 @@ impl ArchetPatch {
     pub fn factory_presets() -> Vec<Self> {
         let named = |mut p: Self, n: &str| { p.name = n.into(); p };
         vec![
-            // ── Solo arco ───────────────────────────────────────────────
+            // -- Solo arco -----------------------------------------------
             named(Self::violin(),      "Violin Solo"),
             named(Self::viola(),       "Viola Solo"),
             named(Self::cello(),       "Cello Solo"),
@@ -372,7 +372,7 @@ impl ArchetPatch {
                          ..Self::cello() }, "Lyrical Cello"),
             named(Self { bow_pos: 0.05, loss: 0.12, bridge_hill_db: 12.0, bow_noise: 0.18,
                          ..Self::cello() }, "Cello Ponticello"),
-            // ── Sections (ensemble cluster, O(1)) ───────────────────────
+            // -- Sections (ensemble cluster, O(1)) -----------------------
             named(Self::violin_ensemble(), "Violin Section"),
             named(Self { ensemble: 6.0, polyphony: 16, attack: 0.05, ..Self::violin() },
                   "Violin Section Small"),
@@ -391,7 +391,7 @@ impl ArchetPatch {
             named(Self { auto_range: true, ensemble: 24.0, polyphony: 40, attack: 0.1,
                          release: 0.25, vib_depth: 18.0, bridge_hill_db: 10.0,
                          ..Self::default() }, "Cinematic Strings"),
-            // ── Pizzicato (plucked arco strings) ────────────────────────
+            // -- Pizzicato (plucked arco strings) ------------------------
             named(Self { pluck: true, vib_depth: 0.0, bow_noise: 0.0, release: 0.08,
                          ..Self::violin() }, "Violin Pizzicato"),
             named(Self { pluck: true, vib_depth: 0.0, bow_noise: 0.0, release: 0.1,

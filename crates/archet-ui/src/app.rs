@@ -129,7 +129,7 @@ impl ArchetApp {
         }
     }
 
-    // ── The window ────────────────────────────────────────────────────
+    // -- The window ----------------------------------------------------
 
     pub fn draw_ui(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
@@ -229,7 +229,7 @@ impl ArchetApp {
             });
     }
 
-    // ── Tier one: the bow on the string ───────────────────────────────
+    // -- Tier one: the bow on the string -------------------------------
 
     fn draw_bow(&mut self, ui: &mut Ui, r: Rect) {
         theme::plate(ui, r, 4.0);
@@ -277,7 +277,7 @@ impl ArchetApp {
         }
     }
 
-    // ── Tier two: the body ────────────────────────────────────────────
+    // -- Tier two: the body --------------------------------------------
 
     fn draw_body(&mut self, ui: &mut Ui, r: Rect) {
         theme::plate(ui, r, 4.0);
@@ -313,7 +313,7 @@ impl ArchetApp {
         }
     }
 
-    // ── Tier three: the player ────────────────────────────────────────
+    // -- Tier three: the player ----------------------------------------
 
     fn draw_player(&mut self, ui: &mut Ui, r: Rect) {
         theme::plate(ui, r, 4.0);
@@ -360,7 +360,7 @@ impl ArchetApp {
         machine::meter(ui, geom::meter(band), peak);
     }
 
-    // ── The controls ──────────────────────────────────────────────────
+    // -- The controls --------------------------------------------------
 
     /// A knob on the panel, at `at`, over one field. Returns the new value
     /// when the hand moved it, and nothing when it did not.

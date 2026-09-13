@@ -1,4 +1,4 @@
-//! ArchetEngine — polyphonic bowed-string voice allocator and audio loop.
+//! ArchetEngine - polyphonic bowed-string voice allocator and audio loop.
 //!
 //! Mirrors Strata's offline-driving interface (`new_for_plugin`, command queue,
 //! interleaved `process_audio`) so the summer_storm render harness drives it the
@@ -25,7 +25,7 @@ pub enum ArchetCommand {
     /// Same-string legato: retune the currently-bowing voice instead of starting
     /// a fresh bow stroke (slurred notes connect without re-attacking).
     NoteOnLegato(u8, u8),
-    /// Détaché bow change: reverse the bow on the currently-bowing voice (continuous
+    /// Detache bow change: reverse the bow on the currently-bowing voice (continuous
     /// contact, no lift -> no pluck) for a separate but connected note.
     BowChange(u8, u8),
     NoteOff(u8),
@@ -328,7 +328,7 @@ impl ArchetEngine {
                     }
                 }
                 ArchetCommand::BowChange(note, vel) => {
-                    // Détaché: reverse the bow on the still-bowing voice (no lift -> no
+                    // Detache: reverse the bow on the still-bowing voice (no lift -> no
                     // pluck). Same voice-selection as legato; fresh stroke if none down.
                     let poly = (self.patch.polyphony as usize).min(MAX_VOICES);
                     let best = (0..poly)
@@ -423,7 +423,7 @@ impl ArchetEngine {
     pub fn load_patch(&mut self, p: ArchetPatch) {
         self.patch = p;
         // Patches saved by the old 1..48 GUI knob (or hand-edited JSON)
-        // can carry a polyphony above the real voice pool — clamp so the
+        // can carry a polyphony above the real voice pool - clamp so the
         // GUI mirror and the engine agree.
         self.patch.polyphony = self.patch.polyphony.clamp(1, MAX_VOICES as u8);
         self.patch_dirty = true;
@@ -448,7 +448,7 @@ impl ArchetEngine {
         }
     }
 
-    /// ENSEMBLE / string-SECTION note-on (research model, Ternström JASA on
+    /// ENSEMBLE / string-SECTION note-on (research model, Ternstroem JASA on
     /// unison frequency scatter + Meyer on orchestral sections): one melodic
     /// note becomes `count` REAL physical-model players, each with
     ///  - a STATIC F0 offset drawn ~ Gaussian, SD ~14 cents * depth (the
@@ -463,14 +463,14 @@ impl ArchetEngine {
     fn fire_unison(&mut self, note: u8, vel: u8, seq: u64) {
         // `ensemble` is the SECTION SIZE in PLAYERS. Real physical voices
         // are bounded at PHYS_CAP (the perceptual-saturation point,
-        // Ternström): enough independent instantaneous pitches to fill the
+        // Ternstroem): enough independent instantaneous pitches to fill the
         // scatter band. Requested sizes ABOVE the cap are realized by the
         // O(1) section diffuser (engine output) -- cost stays flat, so a
         // 100-violin setting is feasible.
         let size = self.patch.ensemble.max(2.0);
         let count: usize = (size.round() as usize).clamp(2, PHYS_CAP);
         // measured inter-player F0 dispersion of a real section is 20-30 cents
-        // (Cuesta/Chandna unison analysis; Ternström) -- NOT the 14c tight-
+        // (Cuesta/Chandna unison analysis; Ternstroem) -- NOT the 14c tight-
         // unison preference. 22c SD here + the per-voice slow drift gives the
         // living, partials-crossing section instead of a fused fat unison.
         let sd_cents = 22.0;
@@ -553,7 +553,7 @@ mod preset_sweep_tests {
             }
         }
         assert!(loudest > 1e-3,
-            "no archet preset produced audible output — excitation path is broken");
+            "no archet preset produced audible output - excitation path is broken");
     }
 
     /// Byte-identity golden for the multi-voice render path. The live-RT WAVE 3
@@ -602,7 +602,7 @@ mod profile {
     /// tail is never one string's own decay.
     ///   cargo test --release --lib engine::profile::pizz_decay -- --ignored --nocapture
     #[test]
-    #[ignore = "diagnostic — run with --ignored"]
+    #[ignore = "diagnostic - run with --ignored"]
     fn pizz_decay() {
         let sr = 48_000.0_f32;
         let bank = crate::patch::ArchetPatch::factory_presets();
@@ -662,7 +662,7 @@ mod profile {
     /// violin.
     ///   cargo test --lib engine::profile::pizz_family -- --ignored --nocapture
     #[test]
-    #[ignore = "diagnostic — run with --ignored"]
+    #[ignore = "diagnostic - run with --ignored"]
     fn pizz_family() {
         use crate::patch::{ArchetPatch, Instrument};
         let sr = 48_000.0_f32;
@@ -715,7 +715,7 @@ mod profile {
     /// note has one position, and four notes are four samples.
     ///   cargo test --lib engine::profile::pizz_spread -- --ignored --nocapture
     #[test]
-    #[ignore = "diagnostic — run with --ignored"]
+    #[ignore = "diagnostic - run with --ignored"]
     fn pizz_spread() {
         let sr = 48_000.0_f32;
         let bank = crate::patch::ArchetPatch::factory_presets();
@@ -764,7 +764,7 @@ mod profile {
     /// pluck every few semitones at full velocity, the loudest case there is.
     ///   cargo test --lib engine::profile::pizz_register -- --ignored --nocapture
     #[test]
-    #[ignore = "diagnostic — run with --ignored"]
+    #[ignore = "diagnostic - run with --ignored"]
     fn pizz_register() {
         let sr = 48_000.0_f32;
         let bank = crate::patch::ArchetPatch::factory_presets();
@@ -812,7 +812,7 @@ mod profile {
     /// between them.
     ///   cargo test --lib engine::profile::pizz_melody -- --ignored --nocapture
     #[test]
-    #[ignore = "diagnostic — run with --ignored"]
+    #[ignore = "diagnostic - run with --ignored"]
     fn pizz_melody() {
         let sr = 48_000.0_f32;
         let bank = crate::patch::ArchetPatch::factory_presets();
@@ -891,7 +891,7 @@ mod profile {
     /// is what would show it.
     ///   cargo test --lib engine::profile::bow_release -- --ignored --nocapture
     #[test]
-    #[ignore = "diagnostic — run with --ignored"]
+    #[ignore = "diagnostic - run with --ignored"]
     fn bow_release() {
         let sr = 48_000.0_f32;
         let block = 512usize;
@@ -948,7 +948,7 @@ mod profile {
     /// measurement settles it.
     ///   cargo test --lib engine::profile::bow_phrase -- --ignored --nocapture
     #[test]
-    #[ignore = "diagnostic — run with --ignored"]
+    #[ignore = "diagnostic - run with --ignored"]
     fn bow_phrase() {
         let sr = 48_000.0_f32;
         let block = 512usize;
@@ -1016,7 +1016,7 @@ mod profile {
     /// sustains, so neither number alone compares them.
     ///   cargo test --lib engine::profile::preset_levels -- --ignored --nocapture
     #[test]
-    #[ignore = "diagnostic — run with --ignored"]
+    #[ignore = "diagnostic - run with --ignored"]
     fn preset_levels() {
         let sr = 48_000.0_f32;
         let block = 512usize;
@@ -1057,7 +1057,7 @@ mod profile {
     /// full velocity, filling the voice pool, is the worst a player can ask for.
     ///   cargo test --lib engine::profile::chord_headroom -- --ignored --nocapture
     #[test]
-    #[ignore = "diagnostic — run with --ignored"]
+    #[ignore = "diagnostic - run with --ignored"]
     fn chord_headroom() {
         let sr = 48_000.0_f32;
         let block = 512usize;
@@ -1489,7 +1489,7 @@ mod profile {
     /// where a first attempt at this measurement landed.
     ///   cargo test --lib engine::profile::pizz_stop -- --ignored --nocapture
     #[test]
-    #[ignore = "diagnostic — run with --ignored"]
+    #[ignore = "diagnostic - run with --ignored"]
     fn pizz_stop() {
         let sr = 48_000.0_f32;
         let block = 512usize;
@@ -1585,7 +1585,7 @@ mod profile {
     /// Written to /tmp/archet_bow_held_<velocity>.wav.
     ///   cargo test --lib engine::profile::bow_held -- --ignored --nocapture
     #[test]
-    #[ignore = "diagnostic — run with --ignored"]
+    #[ignore = "diagnostic - run with --ignored"]
     fn bow_held() {
         let sr = 48_000.0_f32;
         let block = 512usize;
@@ -1661,7 +1661,7 @@ mod profile {
     /// written here are played.
     ///   cargo test --lib engine::profile::score_render -- --ignored --nocapture
     #[test]
-    #[ignore = "diagnostic — run with --ignored"]
+    #[ignore = "diagnostic - run with --ignored"]
     fn score_render() {
         use crate::patch::{ArchetPatch, Instrument};
         let sr = 48_000.0_f32;
@@ -1793,7 +1793,7 @@ mod profile {
     /// the body/string tuning driven OBJECTIVELY (no listening).
     ///   cargo test --lib engine::profile::violin_fit -- --ignored --nocapture
     #[test]
-    #[ignore = "diagnostic — run with --ignored"]
+    #[ignore = "diagnostic - run with --ignored"]
     fn violin_fit() {
         let sr = 48_000.0_f32;
         for pitch in [55u8, 62, 69, 74, 81] {
@@ -1821,7 +1821,7 @@ mod profile {
     /// objective signature of "not mechanical"). -> /tmp/archet_phrase.wav
     ///   cargo test --lib engine::profile::phrase_dyn -- --ignored --nocapture
     #[test]
-    #[ignore = "diagnostic — run with --ignored"]
+    #[ignore = "diagnostic - run with --ignored"]
     fn phrase_dyn() {
         let sr = 48_000.0_f32;
         let (mut eng, tx, _mr) = ArchetEngine::new_for_plugin(sr);
@@ -1874,7 +1874,7 @@ mod profile {
                 e
             }).collect()
         };
-        // DÉTACHÉ SEQUENCE: 4 fast notes via bow changes (continuous bow, no lift).
+        // DETACHE SEQUENCE: 4 fast notes via bow changes (continuous bow, no lift).
         // The level should stay UP between notes (continuous), not dip to silence
         // (which would be a string of plucks).
         let det = render(vec![
@@ -1892,9 +1892,9 @@ mod profile {
             let c = (t * sr / (0.004 * sr)) as usize;
             de[c.saturating_sub(span)..(c + span).min(de.len())].iter().cloned().fold(9.9, f32::min)
         }).collect();
-        println!("DÉTACHÉ seq (bow changes): inter-note dips = {} % of peak (high=continuous, ~0=plucks)",
+        println!("DETACHE seq (bow changes): inter-note dips = {} % of peak (high=continuous, ~0=plucks)",
                  mins.iter().map(|m| format!("{:.0}", m / dpk * 100.0)).collect::<Vec<_>>().join(","));
-        print!("  env(每4ms): "); for v in de.iter().take(140) { print!("{}", (v / dpk * 9.0) as u8); } println!();
+        print!("  env(per 4 ms): "); for v in de.iter().take(140) { print!("{}", (v / dpk * 9.0) as u8); } println!();
         write_wav("/tmp/archet_detache.wav", &det, sr);
         // LEGATO: 67 for 150ms, slur to 69, hold 150ms, off
         let leg = render(vec![(0.0, ArchetCommand::NoteOn(67, 90)), (0.15, ArchetCommand::NoteOnLegato(69, 90)),
@@ -1906,10 +1906,10 @@ mod profile {
         let dip = le[si.saturating_sub(3)..(si + 8).min(le.len())].iter().cloned().fold(9.9, f32::min);
         println!("LEGATO 67->69 slur: env dip at slur = {:.0}% of peak (100%=seamless, low=gap/click)",
                  dip / lpk * 100.0);
-        print!("  env(每4ms): "); for v in le.iter().take(80) { print!("{}", (v / lpk * 9.0) as u8); } println!();
+        print!("  env(per 4 ms): "); for v in le.iter().take(80) { print!("{}", (v / lpk * 9.0) as u8); } println!();
         write_wav("/tmp/archet_legato.wav", &leg, sr);
 
-        // GESTURE ARCH: one short détaché note (110 ms) must be an ARCH (peak in the
+        // GESTURE ARCH: one short detache note (110 ms) must be an ARCH (peak in the
         // middle 20-75% of the sounding span, NOT an instant-peak flat-top rectangle).
         let arch_note = |t0: f32| -> Vec<f32> {
             render(vec![(0.05, ArchetCommand::NoteOn(71, 90 + (t0 * 10.0) as u8)),
@@ -1927,7 +1927,7 @@ mod profile {
             / ((i1 - i0 + 1) as f32);
         println!("ARCH short note: peak at {:.0}% of span (want 20-75), flat-top {:.0}% (want <50)",
                  peak_pos * 100.0, flat * 100.0);
-        print!("  env(每4ms): "); for v in e1.iter().take(60) { print!("{}", (v / pk1 * 9.0) as u8); } println!();
+        print!("  env(per 4 ms): "); for v in e1.iter().take(60) { print!("{}", (v / pk1 * 9.0) as u8); } println!();
 
         // PER-NOTE VARIATION: two identical-pitch/velocity notes from the same engine
         // must have different envelopes (correlation < 0.98).
@@ -2011,7 +2011,7 @@ mod profile {
     /// can be measured for the body's published band targets.
     ///   cargo test --lib engine::profile::full_range_fit -- --ignored --nocapture
     #[test]
-    #[ignore = "diagnostic — run with --ignored"]
+    #[ignore = "diagnostic - run with --ignored"]
     fn full_range_fit() {
         let sr = 48_000.0_f32;
         let specs: [(&str, fn() -> ArchetPatch, &[u8]); 4] = [
@@ -2042,7 +2042,7 @@ mod profile {
     /// behaves like a bowed string or a synth saw. -> /tmp/archet_bass_<pitch>.wav
     ///   cargo test --lib engine::profile::dump_bass -- --ignored --nocapture
     #[test]
-    #[ignore = "diagnostic — run with --ignored"]
+    #[ignore = "diagnostic - run with --ignored"]
     fn dump_bass() {
         let sr = 48_000.0_f32;
         for pitch in [28u8, 33, 40, 45, 52] {
@@ -2064,7 +2064,7 @@ mod profile {
     /// De-risk: render a held D4 (violin) -> /tmp/archet_bow.wav.
     ///   cargo test --lib engine::profile::bow_derisk -- --ignored --nocapture
     #[test]
-    #[ignore = "diagnostic — run with --ignored"]
+    #[ignore = "diagnostic - run with --ignored"]
     fn bow_derisk() {
         let sr = 48_000.0_f32;
         // A/B the two friction models on the same held D4.

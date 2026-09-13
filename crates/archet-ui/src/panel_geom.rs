@@ -11,7 +11,7 @@
 
 use egui::{Pos2, Rect, Vec2};
 
-// ── The panel's units ────────────────────────────────────────────────
+// -- The panel's units ------------------------------------------------
 
 pub const KNOB: f32 = 30.0;
 pub const KNOB_BIG: f32 = 42.0;
@@ -27,7 +27,7 @@ pub const PLAYER_H: f32 = 172.0;
 pub const TIER_GAP: f32 = 10.0;
 pub const MARGIN: f32 = 14.0;
 
-// ── The tiers ────────────────────────────────────────────────────────
+// -- The tiers --------------------------------------------------------
 
 /// The band a tier occupies, inside the panel's margin.
 pub fn tier(panel: Rect, index: usize) -> Rect {
@@ -42,7 +42,7 @@ pub fn tier(panel: Rect, index: usize) -> Rect {
     )
 }
 
-// ── The bow on the string ────────────────────────────────────────────
+// -- The bow on the string --------------------------------------------
 
 /// The window the string is drawn in, from the nut at the left to the
 /// bridge at the right.
@@ -91,7 +91,7 @@ pub fn bow_knob(band: Rect, row: usize, i: usize) -> Pos2 {
     )
 }
 
-// ── The body ─────────────────────────────────────────────────────────
+// -- The body ---------------------------------------------------------
 
 /// The four bodies, stacked down the left of the tier.
 pub const RAIL_W: f32 = 128.0;
@@ -124,7 +124,7 @@ pub fn body_knob(band: Rect, row: usize, i: usize) -> Pos2 {
     )
 }
 
-// ── The player ───────────────────────────────────────────────────────
+// -- The player -------------------------------------------------------
 
 pub fn player_knob(band: Rect, row: usize, i: usize) -> Pos2 {
     Pos2::new(
@@ -146,7 +146,7 @@ pub fn meter(band: Rect) -> Rect {
     )
 }
 
-// ── Frequency, and back again ────────────────────────────────────────
+// -- Frequency, and back again ----------------------------------------
 
 /// The band the body's picture spans. A violin's lowest mode sits near
 /// 280 Hz and its brilliance band ends near 7 kHz, so the axis is the
