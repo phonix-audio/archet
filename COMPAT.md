@@ -36,6 +36,18 @@ new field must default to today's behaviour. Field names are
 the wire format; `#[serde(default)]` plus a Default impl is what lets an old
 project open in a new build.
 
+## Fields a patch no longer has
+
+`friction`, `slope`, `tor_ratio`, `tor_couple` and `tor_inject` fed a
+waveguide the sound stopped passing through once the string became modal;
+they were removed with it. A session that still carries them loads: serde
+ignores a field the struct does not name. Three fields changed what they do
+when the waveguide went: `bow_pos` is the modal string's bow point (and,
+plucked, the finger's), `loss` scales the string's loss law about its
+calibrated value, and `vel_sens` is the share of the dynamic range the
+velocity commands. The factory presets carry the values the model was
+calibrated at.
+
 ## The chain a patch carries
 
     slots   equaliser, space, ceiling

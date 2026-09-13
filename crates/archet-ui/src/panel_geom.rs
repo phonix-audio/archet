@@ -83,10 +83,14 @@ pub fn x_to_beta(field: Rect, x: f32) -> f32 {
     BETA_MIN + t * (BETA_MAX - BETA_MIN)
 }
 
+/// Where the knob column starts, from a tier's left edge: the same on the
+/// bow and the body, so the two tiers read as one panel.
+pub const KNOB_COLUMN: f32 = 552.0;
+
 /// The bow's knobs, to the right of the string: two rows.
 pub fn bow_knob(band: Rect, row: usize, i: usize) -> Pos2 {
     Pos2::new(
-        band.left() + 552.0 + i as f32 * CELL,
+        band.left() + KNOB_COLUMN + i as f32 * CELL,
         band.top() + 22.0 + row as f32 * 76.0,
     )
 }
@@ -104,11 +108,12 @@ pub fn body_cell(band: Rect, i: usize) -> Rect {
     )
 }
 
-/// The window the body's response is drawn in, beside the rail.
+/// The window the body's response is drawn in, beside the rail, ending
+/// where the bow's window ends a tier above.
 pub fn body_window(band: Rect) -> Rect {
     Rect::from_min_size(
         Pos2::new(band.left() + RAIL_W + 18.0, band.top() + 18.0),
-        Vec2::new(330.0, BODY_H - 36.0),
+        Vec2::new(KNOB_COLUMN - RAIL_W - 18.0 - 32.0, BODY_H - 36.0),
     )
 }
 
@@ -116,10 +121,11 @@ pub fn body_field(band: Rect) -> Rect {
     body_window(band).shrink(8.0)
 }
 
-/// The body's knobs, to the right of its window: two rows.
+/// The body's controls, to the right of its window, in the bow's column:
+/// the switch on the first row, the knob on the second.
 pub fn body_knob(band: Rect, row: usize, i: usize) -> Pos2 {
     Pos2::new(
-        band.left() + RAIL_W + 364.0 + i as f32 * CELL,
+        band.left() + KNOB_COLUMN + i as f32 * CELL,
         band.top() + 20.0 + row as f32 * 76.0,
     )
 }
@@ -217,6 +223,7 @@ mod tests {
         for r in [body_window(body), body_field(body)] {
             assert!(body.contains_rect(r), "{r:?} leaves the body tier");
         }
+        assert!(body_window(body).right() < body_knob(body, 0, 0).x, "the window runs into the knobs");
         for row in 0..2 {
             for i in 0..3 {
                 let at = body_knob(body, row, i);

@@ -221,7 +221,7 @@ impl ArchetParams {
             full_range: IntParam::new("Full Range", 0, IntRange::Linear { min: 0, max: 1 })
                 .with_value_to_string(Arc::new(|v| if v == 0 { "Single".into() } else { "Composite".into() })),
 
-            bow_pos: FloatParam::new("Bow Position", 0.13, FloatRange::Linear { min: 0.03, max: 0.20 })
+            bow_pos: FloatParam::new("Bow Position", 0.075, FloatRange::Linear { min: 0.03, max: 0.20 })
                 .with_value_to_string(formatters::v2s_f32_rounded(3)),
             bow_vel: FloatParam::new("Bow Velocity", 0.18, FloatRange::Linear { min: 0.02, max: 0.5 })
                 .with_value_to_string(formatters::v2s_f32_rounded(2)),
@@ -241,7 +241,7 @@ impl ArchetParams {
             release: FloatParam::new("Release", 0.12, FloatRange::Skewed {
                 min: 0.02, max: 0.4, factor: FloatRange::skew_factor(-1.5),
             }).with_unit(" s").with_value_to_string(formatters::v2s_f32_rounded(3)),
-            vel_sens: FloatParam::new("Velocity Sens", 0.3, FloatRange::Linear { min: 0.0, max: 1.0 })
+            vel_sens: FloatParam::new("Velocity Sens", 1.0, FloatRange::Linear { min: 0.0, max: 1.0 })
                 .with_unit(" %").with_value_to_string(formatters::v2s_f32_percentage(0)),
 
             vib_rate: FloatParam::new("Vibrato Rate", 5.8, FloatRange::Linear { min: 3.0, max: 8.0 })

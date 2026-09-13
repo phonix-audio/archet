@@ -572,7 +572,7 @@ mod preset_sweep_tests {
             left.extend(buf.iter().step_by(2));
         }
         let h = crate::fingerprint::of(&left);
-        const GOLDEN: u64 = 0x141e86a916cc5448; // the ensemble render, note-offs included
+        const GOLDEN: u64 = 0xc12e408ddcf2d7d2; // the ensemble render, note-offs included
         assert_eq!(h, GOLDEN, "Archet ensemble render drifted from golden (hash {h:#018x})");
     }
 }
@@ -1564,6 +1564,131 @@ mod profile {
         println!("  (dB against the level before the second attack; columns at +150 and +300 ms)");
     }
 
+    /// Every parameter at its two ends, and whether the sound moved: level,
+    /// centroid and fingerprint of one second of one note, on the solo
+    /// violin bowed and plucked. A parameter that moves nothing on either
+    /// is inert.
+    ///   cargo test --release --lib engine::profile::param_audit -- --ignored --nocapture
+    #[test]
+    #[ignore = "diagnostic - run with --ignored"]
+    fn param_audit() {
+        use crate::patch::ArchetParam as P;
+        let sr = 48_000.0_f32;
+        let block = 256usize;
+        let bank = crate::patch::ArchetPatch::factory_presets();
+        let find = |n: &str| bank.iter().find(|p| p.name == n).unwrap_or_else(|| panic!("no {n}")).clone();
+        let params: [(P, &str, f32, f32); 17] = [
+            (P::BowPos, "bow_pos", 0.03, 0.20), (P::BowVel, "bow_vel", 0.02, 0.5),
+            (P::BowForce, "bow_force", 0.2, 2.0), (P::BowNoise, "bow_noise", 0.0, 0.4),
+            (P::Loss, "loss", 0.0, 0.6), (P::BridgeHillDb, "bridge_hill_db", 0.0, 15.0),
+            (P::Attack, "attack", 0.005, 0.2),
+            (P::Release, "release", 0.02, 0.4), (P::VelSens, "vel_sens", 0.0, 1.0),
+            (P::VibRate, "vib_rate", 3.0, 8.0), (P::VibDepth, "vib_depth", 0.0, 30.0),
+            (P::VibDelay, "vib_delay", 0.0, 0.8), (P::Ensemble, "ensemble", 0.0, 12.0),
+            (P::TuneCents, "tune_cents", -50.0, 50.0), (P::Instrument, "instrument", 0.0, 3.0),
+            (P::AutoRange, "auto_range", 0.0, 1.0), (P::Pluck, "pluck", 0.0, 1.0),
+        ];
+        let render = |preset: &crate::patch::ArchetPatch, param: P, value: f32| -> (f32, f32, u64) {
+            let (mut eng, tx, _mr) = ArchetEngine::new_for_plugin(sr);
+            let mut p = preset.clone();
+            param.apply(&mut p, value);
+            tx.send(ArchetCommand::LoadPatch(Box::new(p))).unwrap();
+            let mut buf = vec![0.0f32; block * 2];
+            eng.process_audio(&mut buf, 2);
+            tx.send(ArchetCommand::NoteOn(69, 100)).unwrap();
+            let mut out: Vec<f32> = Vec::new();
+            let hold = (0.7 * sr) as usize / block;
+            for i in 0..((1.0 * sr) as usize / block) {
+                if i == hold {
+                    tx.send(ArchetCommand::NoteOff(69)).unwrap();
+                }
+                buf.fill(0.0);
+                eng.process_audio(&mut buf, 2);
+                for k in 0..block {
+                    out.push(buf[k * 2]);
+                }
+            }
+            let rms = (out.iter().map(|x| x * x).sum::<f32>() / out.len() as f32).sqrt();
+            let level = 20.0 * rms.max(1e-9).log10();
+            // centroid over the held part, by a coarse FFT-free estimate:
+            // the zero-crossing rate scaled by the sample rate.
+            let held = &out[(0.2 * sr) as usize..(0.7 * sr) as usize];
+            let zc = held.windows(2).filter(|w| (w[0] < 0.0) != (w[1] < 0.0)).count() as f32;
+            let centroid = zc / (2.0 * held.len() as f32) * sr;
+            (level, centroid, crate::fingerprint::of(&out))
+        };
+        for name in ["Violin Solo", "Violin Pizzicato"] {
+            let preset = find(name);
+            println!("== {name}: parameter, level at min / max (dBFS), zero-crossing pitch at min / max (Hz)");
+            for (param, label, lo, hi) in params.iter() {
+                let a = render(&preset, *param, *lo);
+                let b = render(&preset, *param, *hi);
+                let inert = a.2 == b.2;
+                println!(
+                    "  {label:<15} {:>6.1} / {:>6.1}     {:>6.0} / {:>6.0}  {}",
+                    a.0, b.0, a.1, b.1, if inert { "INERT" } else { "" }
+                );
+            }
+        }
+    }
+
+    /// What the attack control does to a bowed onset: the rise of the
+    /// envelope from a tenth to nine tenths of its level, at the control's
+    /// two ends and its default.
+    ///   cargo test --lib engine::profile::bow_attack -- --ignored --nocapture
+    #[test]
+    #[ignore = "diagnostic - run with --ignored"]
+    fn bow_attack() {
+        let sr = 48_000.0_f32;
+        let block = 64usize;
+        let bank = crate::patch::ArchetPatch::factory_presets();
+        let preset = bank
+            .iter()
+            .find(|p| p.name == "Violin Solo")
+            .expect("the bank no longer has Violin Solo");
+        println!("  velocity  attack   settled within 1 dB by   rise 10-90 %   level at 20 / 50 / 100 / 200 ms (dB re 1 s)");
+        for (vel, attack) in [60u8, 100, 127].iter().flat_map(|&v| [0.005f32, 0.01, 0.02, 0.04, 0.08, 0.15, 0.3].map(|a| (v, a))) {
+            let (mut eng, tx, _mr) = ArchetEngine::new_for_plugin(sr);
+            let mut p = preset.clone();
+            p.attack = attack;
+            p.vib_depth = 0.0;
+            tx.send(ArchetCommand::LoadPatch(Box::new(p))).unwrap();
+            let mut buf = vec![0.0f32; block * 2];
+            eng.process_audio(&mut buf, 2);
+            tx.send(ArchetCommand::NoteOn(69, vel)).unwrap();
+            let mut out: Vec<f32> = Vec::new();
+            for _ in 0..((1.2 * sr) as usize / block) {
+                buf.fill(0.0);
+                eng.process_audio(&mut buf, 2);
+                for k in 0..block {
+                    out.push(buf[k * 2]);
+                }
+            }
+            let hop = (0.002 * sr) as usize;
+            let env: Vec<f32> = out
+                .chunks(hop)
+                .map(|c| (c.iter().map(|x| x * x).sum::<f32>() / c.len() as f32).sqrt())
+                .collect();
+            let steady = env[(0.9 * sr) as usize / hop..].iter().sum::<f32>() / (env.len() - (0.9 * sr) as usize / hop) as f32;
+            let at = |frac: f32| env.iter().position(|&e| e >= frac * steady).unwrap_or(env.len()) as f32 * hop as f32 / sr;
+            let db = |t: f32| 20.0 * (env[(t * sr) as usize / hop] / steady).max(1e-6).log10();
+            let settled = env
+                .iter()
+                .enumerate()
+                .find(|(i, _)| env[*i..].iter().all(|&e| (e / steady).max(1e-6).log10().abs() * 20.0 <= 1.0))
+                .map_or(f32::NAN, |(i, _)| i as f32 * hop as f32 / sr);
+            println!(
+                "  {vel:>5}  {attack:>6.3} s   {:>6.0} ms            {:>6.0} ms       {:>5.1} / {:>5.1} / {:>5.1} / {:>5.1}",
+                settled * 1000.0,
+                (at(0.9) - at(0.1)) * 1000.0,
+                db(0.02),
+                db(0.05),
+                db(0.10),
+                db(0.20)
+            );
+        }
+    }
+
     /// The cost of the largest section: a four-note chord held on the
     /// largest violin section, timed against the audio it renders.
     ///   cargo test --release --lib engine::profile::section_load -- --ignored --nocapture
@@ -2082,46 +2207,6 @@ mod profile {
         println!("wrote /tmp/archet_bass_{{28,33,40,45,52}}.wav");
     }
 
-    /// De-risk: render a held D4 (violin) -> /tmp/archet_bow.wav.
-    ///   cargo test --lib engine::profile::bow_derisk -- --ignored --nocapture
-    #[test]
-    #[ignore = "diagnostic - run with --ignored"]
-    fn bow_derisk() {
-        let sr = 48_000.0_f32;
-        // A/B the two friction models on the same held D4.
-        for (kind, path) in [
-            (crate::patch::FrictionKind::Static, "/tmp/archet_bow.wav"),
-            (crate::patch::FrictionKind::ElastoPlastic, "/tmp/archet_bow_ep.wav"),
-        ] {
-            let (mut eng, tx, _mr) = ArchetEngine::new_for_plugin(sr);
-            let mut p = ArchetPatch::violin();
-            p.polyphony = 1;
-            p.friction = kind;
-            tx.send(ArchetCommand::LoadPatch(Box::new(p))).unwrap();
-            tx.send(ArchetCommand::NoteOn(62, 100)).unwrap(); // D4
-
-            let block = 512usize;
-            let n_hold = (2.0 * sr) as usize / block;
-            let n_tail = (0.6 * sr) as usize / block;
-            let mut out: Vec<f32> = Vec::new();
-            let mut buf = vec![0.0f32; block * 2];
-            for _ in 0..n_hold {
-                buf.fill(0.0);
-                eng.process_audio(&mut buf, 2);
-                for i in 0..block { out.push(buf[i * 2]); }
-            }
-            tx.send(ArchetCommand::NoteOff(62)).unwrap();
-            for _ in 0..n_tail {
-                buf.fill(0.0);
-                eng.process_audio(&mut buf, 2);
-                for i in 0..block { out.push(buf[i * 2]); }
-            }
-            write_wav(path, &out, sr);
-            let peak = out.iter().fold(0.0f32, |a, &b| a.max(b.abs()));
-            println!("wrote {} ({:?}) peak={:.3}", path, kind, peak);
-        }
-    }
-
     fn write_wav(path: &str, mono: &[f32], sr: f32) {
         use std::io::Write;
         let n = mono.len();
@@ -2381,6 +2466,6 @@ mod golden_audio {
         }
         let h = crate::fingerprint::of(&left);
         eprintln!("GOLDEN = {h:#018x}");
-        assert_eq!(h, 0x79021dea6c793a02, "the engine's rendered audio changed");
+        assert_eq!(h, 0xd246_c8a6_7afe_10f6, "the engine's rendered audio changed");
     }
 }

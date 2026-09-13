@@ -8,7 +8,7 @@
 use egui::{Align2, Color32, FontId, Pos2, Rect, Ui, Vec2};
 use std::sync::mpsc;
 
-use archet::patch::{ArchetParam, ArchetPatch, FrictionKind, Instrument};
+use archet::patch::{ArchetParam, ArchetPatch, Instrument};
 use archet::{ArchetCommand, ArchetMeterState};
 use phonix_plugin::preset::Preset;
 use phonix_rt::SharedReader;
@@ -313,13 +313,6 @@ impl ArchetApp {
         if let Some(i) = machine::switch(ui, arco, &["ARCO", "PIZZICATO"], sel, ROSIN, "ar_pluck") {
             self.set(ArchetParam::Pluck, i as f32);
         }
-        let fric = Rect::from_min_size(geom::bow_knob(band, 0, 3) - Vec2::new(0.0, 4.0),
-                                       Vec2::new(2.5 * geom::CELL, 20.0));
-        let sel = usize::from(self.patch.friction == FrictionKind::ElastoPlastic);
-        if let Some(i) = machine::switch(ui, fric, &["STATIC", "ELASTO"], sel, ROSIN, "ar_friction") {
-            self.set(ArchetParam::Friction, i as f32);
-        }
-
         let row: [(&str, ArchetParam, f32, f32, f32, &str); 5] = [
             ("POSITION", ArchetParam::BowPos, self.patch.bow_pos, geom::BETA_MIN, geom::BETA_MAX, "f"),
             ("FORCE", ArchetParam::BowForce, self.patch.bow_force, 0.0, 1.0, "%"),
@@ -340,7 +333,7 @@ impl ArchetApp {
         theme::plate(ui, r, 4.0);
         theme::heading(ui, Pos2::new(r.left() + 12.0, r.top() + 11.0), "THE BODY", PLATE_SILK, r.left() + 100.0);
         theme::printed(ui, Pos2::new(r.left() + 112.0, r.top() + 11.0),
-                       "the corpus the string drives, and the torsion under it",
+                       "the corpus the string drives",
                        FontId::proportional(8.5), PLATE_SILK_DIM, Align2::LEFT_CENTER);
 
         let band = Rect::from_min_max(r.min + Vec2::new(12.0, 0.0), r.max - Vec2::new(12.0, 0.0));
@@ -357,16 +350,11 @@ impl ArchetApp {
             self.set(ArchetParam::AutoRange, i as f32);
         }
 
-        let row: [(&str, ArchetParam, f32, f32, f32, &str); 4] = [
-            ("HILL", ArchetParam::BridgeHillDb, self.patch.bridge_hill_db, 0.0, 24.0, "dB"),
-            ("TORSION", ArchetParam::TorRatio, self.patch.tor_ratio, 0.0, 10.0, "n"),
-            ("COUPLE", ArchetParam::TorCouple, self.patch.tor_couple, 0.0, 1.0, "%"),
-            ("INJECT", ArchetParam::TorInject, self.patch.tor_inject, 0.0, 1.0, "%"),
-        ];
-        for (i, (label, param, v, lo, hi, unit)) in row.into_iter().enumerate() {
-            if let Some(nv) = self.knob(ui, geom::body_knob(band, 1, i), geom::KNOB, label, v, lo, hi, unit, BODY) {
-                self.set(param, nv);
-            }
+        // The body's one knob sits under its switch, in the column the bow's
+        // knobs use a tier above.
+        if let Some(nv) = self.knob(ui, geom::body_knob(band, 1, 0), geom::KNOB, "HILL",
+                                    self.patch.bridge_hill_db, 0.0, 24.0, "dB", BODY) {
+            self.set(ArchetParam::BridgeHillDb, nv);
         }
     }
 

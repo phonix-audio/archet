@@ -23,6 +23,15 @@ a measurement, and what has been tried.
   as the bowed losses (darker still). The path is a friction model that
   sharpens the corner (Smith and Woodhouse 2000; Woodhouse 2003), not a
   force-dependent filter.
+- A bowed note reaches its level in 0.3 to 1 s where a recorded one is
+  established within 250 ms and Guettler's clean attacks form in tens of
+  ms (2026-09-13). The bow now starts as a player's does, the force there
+  first and the speed ramping over the attack setting, which makes the
+  setting act; but the modal string with its one-point hyperbolic friction
+  converges to Helmholtz motion at its own pace whatever the acceleration.
+  Excluded by measurement: the slip noise, the slow force drift and the
+  sympathetic strings (each silenced, the onset unchanged). The cause is
+  the same missing mechanism as the brightness above.
 - The bowed string has one transverse plane; the plucked one has two.
 - The vibrato's onset was measured on four recorded held notes of one
   player (2026-09-13): the first cycle is there within the first period
@@ -48,6 +57,12 @@ a measurement, and what has been tried.
 - The bass strings E, A and G keep an uncalibrated attack corner: the
   calibration ran below the fundamental there, and clamping it made the
   attack worse; the body carries the residue.
+
+- ATTACK and the vibrato controls do nothing to a plucked note: a finger's
+  release has no ramp the model shapes, and the plucked string is not
+  bent. POSITION, DAMPING and DYNAMICS act on both articulations; every
+  other control acts on the articulation it is drawn for, and a diagnostic
+  (`engine::profile::param_audit`) reads them all at both ends.
 
 ## Bodies
 

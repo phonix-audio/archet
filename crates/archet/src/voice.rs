@@ -7,9 +7,7 @@
 //! envelope on the tone: the loudness is the bow's.
 
 use super::body::{Biquad, ModalBody};
-use super::friction::Friction;
 use super::patch::ArchetPatch;
-use super::string::BowedWaveguide;
 use super::modal::ModalString;
 
 pub const MAX_VOICES: usize = 32;
@@ -66,6 +64,13 @@ const VIB_EXTENT_SPREAD: f32 = 0.10;
 /// before it on any of them.
 const VIB_FIRST_CYCLE: f32 = 0.65;
 
+/// The damping setting at which the string's loss law is as calibrated.
+const LOSS_NEUTRAL: f32 = 0.30;
+
+/// Where a finger plucks, as a fraction of the open string's length: the
+/// median the recorded open strings imply from their fifth partial.
+pub const PLUCK_SPOT: f32 = 0.185;
+
 /// Slow intonation drift: the corner of a one-pole walk and its rms in
 /// cents for a soloist (recorded held notes move by one to three cents rms
 /// below 1.5 Hz) and for each player of a section (the time-varying part
@@ -105,21 +110,17 @@ impl Pink {
 
 #[derive(Debug, Clone)]
 pub struct ArchetVoice {
-    string: BowedWaveguide,
     modal: ModalString,   // Demoucron modal string (the one production model)
     // The second transverse plane of a plucked string, a fraction sharp of
     // the first: every partial of a recorded pluck is a doublet that beats.
     modal_b: ModalString,
     // A shaped excitation buffer fed into the string sample by sample
     // (Vaelimaeki 2004).
-    exc_buf: Vec<f32>,
-    exc_pos: usize,
     modal_gain: f32,      // output calibration gain for the modal bridge force
     modal_scratch: f32,   // rosin-scratch mix into the modal bridge (calibrated 0.4)
     modal_recalc: u32,    // throttles the vibrato coefficient recompute (CPU)
     modal_release_factor: f32, // per-sample modal decay on bow-off (~150 ms detache)
     modal_pitch_gain: f32, // pitch-compensating output gain (low notes are ~10 dB too loud)
-    friction: Friction,
     body: ModalBody,
     // The (inst, detune, bridge) the current `body` was laid out with. The
     // body is deterministic in these, so it is laid out again only when
@@ -133,6 +134,8 @@ pub struct ArchetVoice {
     grit_bp: Biquad,  // low "grit" band (~520 Hz) -- the bow grabbing the string
     // humanization (separate noise stream so it doesn't colour the bow scratch)
     hum: Noise,
+    bow_beta: f32,        // the bow's point on the string, a fraction of its length
+    string_damping: f32,  // scale on the string's loss law
     vib_cycle_rate: f32,  // this vibrato cycle's rate, around the note's
     vib_cycle_depth: f32, // this vibrato cycle's extent, around the note's
     flutter: f32,      // fast micro-pitch jitter
@@ -176,7 +179,6 @@ pub struct ArchetVoice {
     stroke_tau: f32,    // sustain decay time constant (s)
     releasing: bool,
     amp_env: f32,   // amplitude attack envelope (soft bow onset, 0->1)
-    note_attack: f32, // per-note attack time (velocity-dependent: accents punchier)
     freq_hz: f32,     // current sounding frequency (sizes the bow-force establishment time)
     freq_target: f32, // legato glide target (freq_hz ramps to it over ~20 ms = slur crossfade)
     vib_amt: f32,     // per-note vibrato scale (soft/short notes vibrate less)
@@ -218,11 +220,8 @@ pub struct ArchetVoice {
 impl ArchetVoice {
     pub fn new(sr: f32, voice_idx: usize) -> Self {
         Self {
-            string: BowedWaveguide::new(sr),
             modal: ModalString::new(sr),
             modal_b: ModalString::new(sr),
-            exc_buf: Vec::new(),
-            exc_pos: 0,
             // the modal bridge force is ~1e-3 scale (displacements ~ 1/omega^2); bring
             // it up to the engine's working level (peak ~0.3).
             modal_gain: 260.0,
@@ -236,7 +235,6 @@ impl ArchetVoice {
             // detache stroke wants.
             modal_release_factor: (0.1f32).powf(1.0 / (0.08 * sr)),
             modal_pitch_gain: 1.0,
-            friction: Friction::new(sr),
             body: ModalBody::new(sr, 0, 1.0, 9.0),
             body_inst: 0,
             body_detune: 1.0,
@@ -246,6 +244,8 @@ impl ArchetVoice {
             noise_bp: Biquad::bandpass(sr, 2800.0, 1.1),
             grit_bp: Biquad::bandpass(sr, 520.0, 0.9),
             hum: Noise::new(0x1234_5678 ^ ((voice_idx as u32).wrapping_mul(40503))),
+            bow_beta: 0.075,
+            string_damping: 1.0,
             vib_cycle_rate: 1.0,
             vib_cycle_depth: 1.0,
             flutter: 0.0,
@@ -283,7 +283,6 @@ impl ArchetVoice {
             freq_target: 220.0,
             releasing: false,
             amp_env: 0.0,
-            note_attack: 0.03,
             vib_amt: 1.0,
             vib_phase: 0.0,
             unison_det: 0.0,
@@ -543,6 +542,12 @@ impl ArchetVoice {
         (frac, self.bow_force, self.bow_vel)
     }
 
+    /// The velocity as the patch lets it act: its distance from mezzo-forte
+    /// scaled by the share of the dynamic range the patch gives it.
+    fn dynamic(patch: &ArchetPatch, v: f32) -> f32 {
+        0.5 + patch.vel_sens.clamp(0.0, 1.0) * (v - 0.5)
+    }
+
     fn modal_params(body_index: usize, freq: f32) -> (f32, f32, f32, f32) {
         // Per instrument: b1 and b2, the per-partial damping law's base and
         // growth; the stiffness inharmonicity, of the order of 1e-5; and the
@@ -569,28 +574,16 @@ impl ArchetVoice {
     /// and pitch set the brightness, the loudness, the attack and the
     /// vibrato amount.
     fn apply_expression(&mut self, note: u8, v: f32, patch: &ArchetPatch) {
+        let v = Self::dynamic(patch, v);
         // Pitch-dependent brightness (octaves above D4=62; Schelleng) + velocity
         // brightness (pp dark/flautando, ff brilliant).
         let oct = (note as f32 - 62.0) / 12.0;
         let bright = (1.0 + oct * 0.45).clamp(0.6, 2.6);
-        let vbr = (v - 0.55).clamp(-0.55, 0.45);
-        self.string.bow_pos = (patch.bow_pos - oct * 0.011 - vbr * 0.028).clamp(0.055, 0.20);
-        self.string.loss = (patch.loss - oct * 0.03 - vbr * 0.16).clamp(0.05, 0.85);
-        self.string.tor_ratio = patch.tor_ratio.clamp(2.0, 8.0);
-        self.string.tor_couple = patch.tor_couple.clamp(0.0, 0.5);
-        self.string.tor_inject = patch.tor_inject.clamp(0.0, 0.5);
-
-        // The waveguide's second polarization: a string detuned by a fraction
-        // of a percent, summed at a level that falls with the register, so
-        // the low instruments keep a periodic waveform.
-        let (vmix, vdet) = match self.inst_idx {
-            0 => (0.22, 0.0025),  // violin: full two-plane warmth
-            1 => (0.16, 0.0020),  // viola
-            2 => (0.09, 0.0014),  // cello
-            _ => (0.04, 0.0008),  // double bass: essentially single, clean string
-        };
-        self.string.vert_mix = vmix;
-        self.string.vert_detune = vdet;
+        // The three controls the string reads: where the bow crosses it,
+        // how damped it is about its calibrated law, and how much of the
+        // dynamic range the velocity commands.
+        self.bow_beta = patch.bow_pos.clamp(0.03, 0.2);
+        self.string_damping = (patch.loss / LOSS_NEUTRAL).clamp(0.25, 2.0);
 
         // The bow force in Schelleng's terms, over the string's impedance
         // times the bow speed. The dynamic moves it through the lower half
@@ -616,7 +609,6 @@ impl ArchetVoice {
         // in the velocity over the instrument's whole range.
         let speed = 10f32.powf((v - 1.0) * SPEED_RANGE_DB / 20.0);
         self.bow_vel_target = patch.bow_vel * speed * bright.sqrt() * (1.0 + r4 * 0.08 * js);
-        self.note_attack = (patch.attack * (1.6 - 0.8 * v) * (1.0 + r1 * 0.15 * js)).clamp(0.010, 0.14);
         // desynchronized, continuous, deeper vibrato for the section
         if ens {
             self.vib_amt = (0.70 + 0.30 * v) * (1.0 + r2 * 0.15);
@@ -630,7 +622,11 @@ impl ArchetVoice {
         // The per-note gesture: rise and fall times jittered per voice,
         // widened for a section so no two strokes share a shape.
         let lowi = self.inst_idx >= 2;
-        self.stroke_rise_t = ((0.055 - 0.047 * v) * (1.0 + r5 * 0.25 * js)).clamp(0.008, 0.090);
+        // The bow's acceleration: from rest to its speed over the attack
+        // setting, quicker on an accent (Guettler, On the creation of the
+        // Helmholtz motion in bowed strings, Acustica 2002: the attack is a
+        // ramp of speed under a force that is there first).
+        self.stroke_rise_t = (patch.attack * (1.6 - 0.8 * v) * (1.0 + r5 * 0.25 * js)).clamp(0.005, 0.3);
         // The release control sets the gesture's fall as well: what a
         // listener hears as the end of a bowed note is the gesture's fall, the
         // bow decelerating off the string. Amplitude follows the stroke, whose
@@ -668,7 +664,7 @@ impl ArchetVoice {
     }
 
     fn note_on_now(&mut self, note: u8, vel: u8, patch: &ArchetPatch) {
-        let v = (vel as f32 / 127.0).clamp(0.0, 1.0);
+        let v = Self::dynamic(patch, (vel as f32 / 127.0).clamp(0.0, 1.0));
         self.vel = v;
         self.note = Some(note);
         self.release_delay = -1; // fresh/retriggered note: cancel any pending lift
@@ -735,14 +731,14 @@ impl ArchetVoice {
             // published measurement pins the spot for a violin; the depth of
             // the fifth partial on the four recorded open strings, never
             // absent, puts it between a sixth and a fifth of the length, and
-            // the median of the four is used. The spread is half a percent
-            // each way, and the fraction folds about the middle, where the
-            // comb is symmetric.
-            const SPOT: f32 = 0.185;
+            // the median of the four, PLUCK_SPOT, is what the plucked presets
+            // carry as their position; the patch's position is the finger's.
+            // The spread is half a percent each way, and the fraction folds
+            // about the middle, where the comb is symmetric.
             let (string, f_open, _) = Self::string_for(self.inst_idx, note);
             self.on_string = Some((self.inst_idx, string));
             self.stopped = false;
-            let spot = SPOT * Self::freq_of(note) / f_open;
+            let spot = patch.bow_pos.clamp(0.03, 0.5) * Self::freq_of(note) / f_open;
             let spot = if spot > 0.5 { 1.0 - spot } else { spot };
             let p = (spot + self.hum.next() * 0.005).clamp(0.02, 0.5);
             // (b) the same string the bow uses, with the same stiffness law.
@@ -752,10 +748,13 @@ impl ArchetVoice {
             // included (see `measured_pizz_t60`).
             let f0 = self.freq_hz;
             let measured = Self::measured_pizz_t60(self.inst_idx, string);
+            // The damping setting scales the measured decays, as it scales
+            // the bowed string's losses.
+            let damping = (patch.loss / LOSS_NEUTRAL).clamp(0.25, 2.0);
             let t60law = move |k: usize| -> f32 {
                 let kf = k as f32;
                 let sk = stiff * kf * kf;
-                Self::t60_from_table(measured, f0 * kf * (1.0 + sk).sqrt())
+                Self::t60_from_table(measured, f0 * kf * (1.0 + sk).sqrt()) / damping
             };
             self.modal.noise_amt = 0.0;
             self.modal.set_voice_t60(self.freq_hz, stiff, p, &t60law);
@@ -790,48 +789,32 @@ impl ArchetVoice {
             let amp = h * 116.0 * (1.0 + self.hum.next() * 0.05);
             self.modal.release(amp, plp, self.freq_hz);
             self.modal_b.release(amp * PLANE_LEVEL, plp, self.freq_hz * (1.0 + PLANE_DETUNE));
-            // (e) the release: the string leaving the fingertip makes a brief
-            // scrape, an order quieter and shorter than a quill's, fed into the
-            // string so it is pitch-correlated rather than added noise.
-            let n_exc = (0.02 * self.sr) as usize;
-            self.exc_buf.clear();
-            self.exc_buf.reserve(n_exc);
-            let mut lp = 0.0f32;
-            for i in 0..n_exc {
-                let t = i as f32 / self.sr;
-                let w = self.noise.next();
-                lp += (w - lp) * 0.12;
-                self.exc_buf.push(lp * (-(t / 0.004)).exp() * h * 0.004);
-            }
-            self.exc_pos = 0;
             self.bow_force = 0.0;
             self.bow_vel = 0.0;
             self.amp_env = 1.0;
             return;
         }
 
-        self.string.note_on(self.freq_hz); // fresh bow stroke: prime + attack
         // The start (Guettler 2002; Woodhouse, Euphonics 9.5): the stroke
         // gesture starts at 0.3, the bow never catching at full speed, and
         // rises over stroke_rise_t; the modal force follows the bow speed, so
         // the Schelleng ratio stays playable through the rise.
-        self.stroke = 0.3;
+        self.stroke = 0.0;
         // The force is consistent with the gesture (stroke^1.3) from the
         // first sample; the corner forms within about a period.
-        self.bow_force = self.bow_force_target * 0.21;
-        self.bow_vel = self.bow_vel_target * self.stroke;
+        // Force first, the bow at rest on the string; the speed follows.
+        self.bow_force = self.bow_force_target;
+        self.bow_vel = 0.0;
 
         {
-            let (b1, b2, stiff, beta) = Self::modal_params(self.inst_idx, self.freq_hz);
+            let (b1, b2, stiff, _) = Self::modal_params(self.inst_idx, self.freq_hz);
+            let (b1, b2, beta) = (b1 * self.string_damping, b2 * self.string_damping, self.bow_beta);
             // Slip noise: a touch on the violin, near none on the low strings.
             self.modal.noise_amt = match self.inst_idx { 0 => 0.12, 1 => 0.05, _ => 0.02 };
             self.modal.set_voice(self.freq_hz, b1, b2, stiff, beta);
             self.modal.reset(); // fresh bow stroke: silent string, perfect-start bow catches it
         }
 
-        self.friction.mode = patch.friction.into();
-        self.friction.slope = patch.slope.max(0.5);
-        self.friction.reset();
         self.vib_cycle_rate = 1.0;
         self.vib_cycle_depth = 1.0;
         self.flutter = 0.0;
@@ -854,7 +837,6 @@ impl ArchetVoice {
         self.bow_vel_target *= self.bow_dir;
         self.freq_target = Self::freq_tuned(note, patch); // glide target (ramped in process)
         self.modal_pitch_gain = Self::modal_pgain(self.freq_target) * Self::inst_level(self.inst_idx);
-        self.string.retune(self.freq_target); // waveguide path: connected retune
     }
 
     /// A detache bow change: the bow stays in contact and reverses; the
@@ -876,9 +858,9 @@ impl ArchetVoice {
         self.freq_hz = Self::freq_tuned(note, patch); // detache: clean re-pitch (separate note)
         self.freq_target = self.freq_hz;
         self.modal_pitch_gain = Self::modal_pgain(self.freq_hz) * Self::inst_level(self.inst_idx);
-        self.string.retune(self.freq_hz);
         {
-            let (b1, b2, stiff, beta) = Self::modal_params(self.inst_idx, self.freq_hz);
+            let (b1, b2, stiff, _) = Self::modal_params(self.inst_idx, self.freq_hz);
+            let (b1, b2, beta) = (b1 * self.string_damping, b2 * self.string_damping, self.bow_beta);
             self.modal.set_voice(self.freq_hz, b1, b2, stiff, beta);
             self.modal.soften(0.5); // the reversal re-forms the corner; shed stale energy
         }
@@ -1001,12 +983,6 @@ impl ArchetVoice {
             };
             self.modal.release_damp = damp;
             self.modal_b.release_damp = damp;
-            // the finger's release scrape, fed into the string
-            if self.exc_pos < self.exc_buf.len() {
-                let e = self.exc_buf[self.exc_pos];
-                self.exc_pos += 1;
-                self.modal.excite(e);
-            }
             let bridge = (self.modal.process(0.0, 0.0) + self.modal_b.process(0.0, 0.0))
                 * self.modal_gain
                 * self.modal_pitch_gain;
@@ -1049,7 +1025,7 @@ impl ArchetVoice {
             if !self.releasing {
                 if self.note_time < self.stroke_rise_t {
                     let x = (self.note_time / self.stroke_rise_t).min(1.0);
-                    self.stroke = 0.3 + 0.7 * (x * std::f32::consts::FRAC_PI_2).sin();
+                    self.stroke = (x * std::f32::consts::FRAC_PI_2).sin();
                 } else {
                     // A held note is held: the bow keeps its speed and force
                     // for as long as the key is down.
@@ -1071,7 +1047,7 @@ impl ArchetVoice {
             let target = if self.releasing {
                 self.bow_force_target * self.stroke.powf(1.5)
             } else {
-                self.bow_force_target * bow_flux * self.force_dip * self.stroke.powf(1.3)
+                self.bow_force_target * bow_flux * self.force_dip
             };
             let coeff = (dt / (1.0 / self.freq_hz).clamp(0.004, 0.020)).min(1.0);
             self.bow_force += (target - self.bow_force) * coeff;
@@ -1143,7 +1119,8 @@ impl ArchetVoice {
             // about 187 Hz is ample for a 6 Hz vibrato).
             self.modal_recalc = self.modal_recalc.wrapping_add(1);
             if !self.releasing && (gliding || self.modal_recalc.is_multiple_of(8)) {
-                let (b1, b2, stiff, beta) = Self::modal_params(self.inst_idx, self.freq_hz);
+                let (b1, b2, stiff, _) = Self::modal_params(self.inst_idx, self.freq_hz);
+            let (b1, b2, beta) = (b1 * self.string_damping, b2 * self.string_damping, self.bow_beta);
                 self.modal.set_voice(self.freq_hz * self.bend, b1, b2, stiff, beta);
             }
             // 1/f amplitude shimmer (register-scaled: steady in the bass).
@@ -1175,7 +1152,11 @@ impl ArchetVoice {
             // at the same place in the Schelleng window on every string and
             // note: fb = press * C01 * |v_bow|.
             let press = self.bow_force.clamp(0.5, 2.0 * PRESS_LOUD);
-            let fb = press * self.modal.impedance() * self.bow_vel.abs();
+            // The force is the player's, not the speed's: through the attack
+            // it stands at its full value while the bow accelerates, and it
+            // leaves with the bow when the bow lifts.
+            let speed = if self.releasing { self.bow_vel.abs() } else { self.bow_vel_target.abs() };
+            let fb = press * self.modal.impedance() * speed;
             // Bow off: extra modal decay so detache notes settle in about
             // 150 ms; while bowing, the natural ring. The damping applies only
             // after the shaped fall has played out, while the bow is still on
@@ -1205,7 +1186,6 @@ impl ArchetVoice {
         // Track energy for activity gating.
         self.energy += (radiated.abs() - self.energy) * 0.001;
         if self.note.is_none() && self.bow_force < 1e-4 && self.energy < 1e-4 {
-            self.string.reset();
             self.body.reset();
             self.energy = 0.0;
         }

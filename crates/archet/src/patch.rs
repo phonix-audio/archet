@@ -5,7 +5,6 @@
 //! plan's Sources); they are exposed so the de-risk and presets can tune them.
 
 use serde::{Deserialize, Serialize};
-use super::friction::FrictionMode;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[derive(Default)]
@@ -28,8 +27,7 @@ pub enum Instrument {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ArchetParam {
     BowPos, BowVel, BowForce, BowNoise,
-    Loss, Slope, Friction, BridgeHillDb,
-    TorRatio, TorCouple, TorInject,
+    Loss, BridgeHillDb,
     Attack, Release, VelSens,
     VibRate, VibDepth, VibDelay,
     Ensemble, TuneCents,
@@ -54,11 +52,7 @@ impl ArchetParam {
             P::BowForce     => p.bow_force = value,
             P::BowNoise     => p.bow_noise = value,
             P::Loss         => p.loss = value,
-            P::Slope        => p.slope = value,
             P::BridgeHillDb => p.bridge_hill_db = value,
-            P::TorRatio     => p.tor_ratio = value,
-            P::TorCouple    => p.tor_couple = value,
-            P::TorInject    => p.tor_inject = value,
             P::Attack       => p.attack = value,
             P::Release      => p.release = value,
             P::VelSens      => p.vel_sens = value,
@@ -67,10 +61,6 @@ impl ArchetParam {
             P::VibDelay     => p.vib_delay = value,
             P::Ensemble     => p.ensemble = value,
             P::TuneCents    => p.tune_cents = value,
-            P::Friction     => {
-                p.friction = if value >= 0.5 { FrictionKind::ElastoPlastic }
-                             else { FrictionKind::Static };
-            }
             P::Instrument   => p.instrument = Instrument::from_index(value as usize),
             P::AutoRange    => p.auto_range = value >= 0.5,
             P::Pluck        => p.pluck = value >= 0.5,
@@ -115,24 +105,6 @@ impl Instrument {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[derive(Default)]
-pub enum FrictionKind {
-    Static,
-    #[default]
-    ElastoPlastic,
-}
-
-
-impl From<FrictionKind> for FrictionMode {
-    fn from(k: FrictionKind) -> Self {
-        match k {
-            FrictionKind::Static => FrictionMode::Static,
-            FrictionKind::ElastoPlastic => FrictionMode::ElastoPlastic,
-        }
-    }
-}
-
 fn def_poly() -> u8 {
     8
 }
@@ -162,9 +134,8 @@ pub struct ArchetPatch {
     pub polyphony: u8,
 
     // --- bow / string ---
-    #[serde(default)]
-    pub friction: FrictionKind,
-    /// Bow position beta (bow-bridge distance / length), ~0.05..0.12.
+    /// Where the bow crosses the string, as a fraction of its length from
+    /// the bridge: the modal string's bow point.
     #[serde(default)]
     pub bow_pos: f32,
     /// Sustained bow velocity (loudness/brightness).
@@ -173,20 +144,12 @@ pub struct ArchetPatch {
     /// Bow force (Schelleng): more force => brighter/louder within the window.
     #[serde(default)]
     pub bow_force: f32,
-    /// Bridge loss one-pole coefficient (0 bright .. 1 dark).
+    /// The string's damping as a scale on its loss law; the default is the
+    /// law as calibrated.
     #[serde(default)]
     pub loss: f32,
-    /// Static-table slope (only used when friction == Static).
-    #[serde(default)]
-    pub slope: f32,
 
     // --- torsion ---
-    #[serde(default)]
-    pub tor_ratio: f32,
-    #[serde(default)]
-    pub tor_couple: f32,
-    #[serde(default)]
-    pub tor_inject: f32,
 
     // --- body ---
     /// Bridge-hill presence in dB (the brightness control of the body).
@@ -217,7 +180,8 @@ pub struct ArchetPatch {
     // --- output ---
     #[serde(default = "def_one")]
     pub output_level: f32,
-    /// Velocity -> bow force/level sensitivity.
+    /// The share of the instrument's dynamic range the velocity commands,
+    /// about mezzo-forte: one is the whole range, zero is every note at mf.
     #[serde(default)]
     pub vel_sens: f32,
     /// Overall tuning offset in cents (per-desk detune so a section of these is
@@ -253,15 +217,10 @@ impl Default for ArchetPatch {
             auto_range: false,
             pluck: false,
             polyphony: 8,
-            friction: FrictionKind::Static,
-            bow_pos: 0.13,
+            bow_pos: 0.075,
             bow_vel: 0.18,
             bow_force: 1.0,
             loss: 0.30,
-            slope: 3.0,
-            tor_ratio: 5.0,
-            tor_couple: 0.10,
-            tor_inject: 0.10,
             bridge_hill_db: 9.0,
             bow_noise: 0.13,
             attack: 0.04,
@@ -270,7 +229,7 @@ impl Default for ArchetPatch {
             vib_depth: 14.0,
             vib_delay: 0.0,
             output_level: 0.9,
-            vel_sens: 0.3,
+            vel_sens: 1.0,
             tune_cents: 0.0,
             seed_offset: 0,
             ensemble: 0.0,
@@ -306,7 +265,7 @@ impl ArchetPatch {
             name: "Viola".into(),
             instrument: Instrument::Viola,
             bridge_hill_db: 7.0,
-            bow_pos: 0.12,
+            bow_pos: 0.080,
             ..Self::default()
         }
     }
@@ -316,10 +275,10 @@ impl ArchetPatch {
             name: "Cello".into(),
             instrument: Instrument::Cello,
             bridge_hill_db: 6.0,
-            bow_pos: 0.10,
+            bow_pos: 0.082,
             // A low loss keeps the mid harmonics through the bridge: a cello's
             // steady centroid sits near 1.7 kHz.
-            loss: 0.16,
+            loss: 0.30,
             vib_rate: 5.2,
             ..Self::default()
         }
@@ -333,8 +292,8 @@ impl ArchetPatch {
             // An arco bass is harmonic-rich: the body radiates the harmonics
             // rather than the 41 Hz fundamental.
             bridge_hill_db: 10.0,  // upper-body presence for the harmonics
-            bow_pos: 0.09,         // near the bridge: many harmonics
-            loss: 0.22,            // bright: harmonics survive, not a clean sub
+            bow_pos: 0.082,
+            loss: 0.30,
             vib_rate: 4.4,
             vib_depth: 7.0,
             bow_noise: 0.14,       // arco bass is noisy
@@ -402,13 +361,13 @@ impl ArchetPatch {
                          release: 0.25, vib_depth: 18.0, bridge_hill_db: 10.0,
                          ..Self::default() }, "Cinematic Strings"),
             // -- Pizzicato (plucked arco strings) ------------------------
-            named(Self { pluck: true, vib_depth: 0.0, bow_noise: 0.0, release: 0.08,
+            named(Self { pluck: true, bow_pos: crate::voice::PLUCK_SPOT, vib_depth: 0.0, bow_noise: 0.0, release: 0.08,
                          ..Self::violin() }, "Violin Pizzicato"),
-            named(Self { pluck: true, vib_depth: 0.0, bow_noise: 0.0, release: 0.1,
+            named(Self { pluck: true, bow_pos: crate::voice::PLUCK_SPOT, vib_depth: 0.0, bow_noise: 0.0, release: 0.1,
                          ..Self::cello() }, "Cello Pizzicato"),
-            named(Self { pluck: true, vib_depth: 0.0, bow_noise: 0.0, release: 0.12,
+            named(Self { pluck: true, bow_pos: crate::voice::PLUCK_SPOT, vib_depth: 0.0, bow_noise: 0.0, release: 0.12,
                          ..Self::double_bass() }, "Bass Pizzicato"),
-            named(Self { pluck: true, vib_depth: 0.0, bow_noise: 0.0, release: 0.06,
+            named(Self { pluck: true, bow_pos: crate::voice::PLUCK_SPOT, vib_depth: 0.0, bow_noise: 0.0, release: 0.06,
                          ensemble: 12.0, polyphony: 32, auto_range: true,
                          ..Self::default() }, "Pizzicato Section"),
         ]

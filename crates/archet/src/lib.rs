@@ -14,11 +14,9 @@ pub mod engine;
 pub mod fx;
 #[cfg(test)]
 pub mod fingerprint;
-pub mod friction;
 pub mod modal;
 pub mod patch;
 pub mod section;
-pub mod string;
 pub mod sympathetic;
 pub mod voice;
 
