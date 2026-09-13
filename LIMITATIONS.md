@@ -83,9 +83,11 @@ a measurement, and what has been tried.
   at it, so past full scale more players add density and no level. The
   fader comes back at 6 dB per second: a soft passage right after a loud
   one starts held down. Inter-sample overshoot is the preset ceiling's.
-- The largest section, thirty-two voices holding a chord, costs about two
-  thirds of one core at 48 kHz in a release build (2026-09-13); two such
-  instances do not fit on one core.
+- The largest section, thirty-two voices holding a chord, costs about a
+  third of one core at 48 kHz in a release build (2026-09-14), the modal
+  string now the larger half of a voice; three such instances do not fit
+  on one core. The editor's load figure is the worst block of the recent
+  past.
 
 - On Linux the plugin pins its own library in memory at first
   instantiation (RTLD_NODELETE), because the wrapper installs a global
