@@ -33,6 +33,13 @@ impl Noise {
     }
 }
 
+/// The bow force in Schelleng's terms (force over the string's impedance
+/// times the bow speed) at the softest and the loudest dynamic. Measured on
+/// the held-note diagnostic: Helmholtz motion settles within half a second
+/// from about two and stays clean past seven.
+const PRESS_SOFT: f32 = 2.0;
+const PRESS_LOUD: f32 = 4.0;
+
 /// 1/f (pink) noise: octave-spaced one-pole-filtered white sources summed
 /// (Voss-McCartney-style). Natural/musical fluctuations are 1/f, not white or
 /// smooth -- this is what the ear reads as a *living* instrument rather than a
@@ -74,7 +81,6 @@ pub struct ArchetVoice {
     // direct LF key-KNOCK that bypasses the string; the release fires a thump.
     exc_buf: Vec<f32>,
     exc_pos: usize,
-    modal_fscale: f32,    // bow-force scale into the modal friction
     modal_gain: f32,      // output calibration gain for the modal bridge force
     modal_scratch: f32,   // rosin-scratch mix into the modal bridge (calibrated 0.4)
     modal_recalc: u32,    // throttles the vibrato coefficient recompute (CPU)
@@ -189,7 +195,6 @@ impl ArchetVoice {
             modal_b: ModalString::new(sr),
             exc_buf: Vec::new(),
             exc_pos: 0,
-            modal_fscale: 1.2,
             // the modal bridge force is ~1e-3 scale (displacements ~ 1/omega^2); bring
             // it up to the engine's working level (peak ~0.3).
             modal_gain: 260.0,
@@ -577,7 +582,11 @@ impl ArchetVoice {
         self.string.vert_mix = vmix;
         self.string.vert_detune = vdet;
 
-        let dyn_ = 0.30 + 0.70 * v * v; // pp .. ff
+        // The bow force in Schelleng's terms, over the string's impedance
+        // times the bow speed. The dynamic moves it through the lower half
+        // of the window where the string settles into Helmholtz motion
+        // within half a second and stays clean, louder notes pressing more.
+        let press = PRESS_SOFT + (PRESS_LOUD - PRESS_SOFT) * v;
         let r1 = self.hum.next();
         let r2 = self.hum.next();
         let r3 = self.hum.next();
@@ -593,7 +602,7 @@ impl ArchetVoice {
         // dynamics.) A solo keeps the tight, expressive spread.
         let ens = patch.ensemble >= 1.5;
         let js = if ens { 2.4 } else { 1.0 }; // per-voice variation scale
-        self.bow_force_target = patch.bow_force * dyn_ * bright * (1.0 + r3 * 0.07 * js);
+        self.bow_force_target = patch.bow_force * press * (1.0 + r3 * 0.07 * js);
         self.bow_vel_target = patch.bow_vel * (0.5 + 0.5 * v) * bright.sqrt() * (1.0 + r4 * 0.08 * js);
         self.note_attack = (patch.attack * (1.6 - 0.8 * v) * (1.0 + r1 * 0.15 * js)).clamp(0.010, 0.14);
         // desynchronized, continuous, deeper vibrato for the section
@@ -1063,17 +1072,9 @@ impl ArchetVoice {
                     let x = (self.note_time / self.stroke_rise_t).min(1.0);
                     self.stroke = 0.3 + 0.7 * (x * std::f32::consts::FRAC_PI_2).sin();
                 } else {
-                    let t = self.note_time - self.stroke_rise_t;
-                    let breathe = self.stroke_floor
-                        + (1.0 - self.stroke_floor) * (-t / self.stroke_tau).exp();
-                    // long notes LIVE: slow swell (+12%) starting ~0.4 s in, alongside
-                    // the vibrato fade-in (sustained notes must not hold a flat level).
-                    let swell = if self.note_time > 0.4 {
-                        1.0 + 0.12 * (1.0 - (-(self.note_time - 0.4) / 0.8).exp())
-                    } else {
-                        1.0
-                    };
-                    self.stroke = (breathe * swell).min(1.05);
+                    // A held note is held: the bow keeps its speed and force
+                    // for as long as the key is down.
+                    self.stroke = 1.0;
                 }
             } else {
                 // shaped fall: the bow decelerates (no abrupt mute)
@@ -1167,7 +1168,7 @@ impl ArchetVoice {
             let attack_burst = 1.0 + 3.5 * (-(self.note_time / 0.03)).exp();
             // Damp the sustained rosin hiss in the low register (real bass is ~16 dB
             // cleaner between harmonics); keep the onset burst for the bow "catch".
-            self.noise_amt = patch.bow_noise * self.bow_force * (self.bow_vel.abs() + 0.04)
+            self.noise_amt = patch.bow_noise * (self.bow_force / PRESS_LOUD) * (self.bow_vel.abs() + 0.04)
                 * attack_burst * (0.3 + 0.7 * alive);
             // Onset CATCH transient, INDEPENDENT of the sustain noise level (which is
             // near zero on the low strings): a short (<=20 ms) burst marking the note
@@ -1186,11 +1187,11 @@ impl ArchetVoice {
         // here kept exciting the string forever -> a continuous drone after the
         // note stopped.
         let bridge = {
-            // Demoucron modal string. CRITICAL: the bow force must be scaled to the
-            // string's numerical impedance (C01 ~ 630-940) for the string to STICK and
-            // form clean Helmholtz motion -- a fixed small force just slips chaotically
-            // (= white noise). fb = press * C01 * |v_bow|, press in the Schelleng window.
-            let press = (self.bow_force * self.modal_fscale).clamp(0.5, 2.5);
+            // Demoucron modal string. The bow force is scaled to the string's
+            // numerical impedance and the bow speed, so the same figure sits
+            // at the same place in the Schelleng window on every string and
+            // note: fb = press * C01 * |v_bow|.
+            let press = self.bow_force.clamp(0.5, 2.0 * PRESS_LOUD);
             let fb = press * self.modal.impedance() * self.bow_vel.abs();
             // bow-off: add extra modal decay so détaché notes settle (~150 ms) instead
             // of ringing like a pluck. While bowing, natural ring (1.0).
