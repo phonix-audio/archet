@@ -78,9 +78,9 @@ a measurement, and what has been tried.
 
 ## Plugin
 
-- The engine's scale puts the largest section's fullest chord just under
-  full scale, so a soloist at full velocity peaks near -22 dBFS; the
-  level control reaches +12 dB, not the 22 the physics spans. The fader
+- A section is no louder than a soloist on the engine's scale: the
+  microphone stands back as the section grows, and the growth of level
+  with players a listener in the hall hears is not rendered. The fader
   behind the sum works only past full scale and comes back at 6 dB per
   second: a soft passage right after a loud one pushed there starts held
   down. Inter-sample overshoot is the preset ceiling's.

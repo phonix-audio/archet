@@ -65,10 +65,8 @@ pub struct ArchetMeterState {
     pub patch_snapshot: Option<ArchetPatch>,
 }
 
-/// The largest section a patch can ask for. The engine's scale is set so
-/// that this section, holding the chord the instrument is voiced for at
-/// full velocity, peaks at full scale; everything smaller sits under it by
-/// its own physics.
+/// The largest section a patch can ask for: past the voices a note
+/// lights, players add nothing the pool can render.
 pub const PLAYERS_MAX: f32 = 32.0;
 
 /// The engine's safety: a fader ride on the summed output. The gain is
@@ -258,24 +256,24 @@ impl ArchetEngine {
             return;
         }
 
-        // Three terms, and none is the polyphony setting, which is how much
+        // Two terms, and neither is the polyphony setting, which is how much
         // overlap the player is allowed, not how much sounds.
         //
-        // A section is as loud as its players' incoherent sum, the root of
-        // their number (Meyer): the voices that render a note already sum
-        // so, and a section larger than them gets the rest as gain.
+        // The first is a fixed headroom for the notes a player sounds at
+        // once, the chord the instrument is voiced to hold; it cannot follow
+        // the live count, which would make a desk pump as notes enter and
+        // leave.
         //
-        // The scale is the loudest the engine can be asked for: the largest
-        // section holding the chord the instrument is voiced for, at full
-        // velocity, peaks at full scale. Both are fixed: a headroom that
-        // followed the live count would make a desk pump as notes enter and
-        // leave, and one that followed the setting would make a section no
-        // louder than a soloist.
+        // The second is the microphone. A section is as loud as its
+        // players' incoherent sum, the root of their number (Meyer), at a
+        // fixed distance; but a section is recorded from as far as it is
+        // wide, and a desk's width grows with the root of its players too,
+        // so a section note reaches the microphone at a soloist's level and
+        // brings its players as density. The voices that render a note sum
+        // incoherently, and dividing by the root of their number is that.
         const CHORD: f32 = 8.0;
         let lit = self.voices_per_note();
-        let asked = if self.patch.ensemble >= 1.5 { self.patch.ensemble.round().max(2.0) } else { 1.0 };
-        let larger = (asked / lit as f32).max(1.0).sqrt();
-        let norm = larger / (CHORD * PLAYERS_MAX).sqrt() * self.patch.output_level;
+        let norm = self.patch.output_level / (CHORD * lit as f32).sqrt();
         // The open strings a plucked note occupies right now cannot ring in
         // sympathy: they are the strings sounding, under a finger or plucked.
         let mut held = [false; 4];
@@ -733,7 +731,7 @@ mod preset_sweep_tests {
             left.extend(buf.iter().step_by(2));
         }
         let h = crate::fingerprint::of(&left);
-        const GOLDEN: u64 = 0x91957b43891abcd3; // the ensemble render, note-offs included
+        const GOLDEN: u64 = 0xe71b9722c3d36962; // the ensemble render, note-offs included
         assert_eq!(h, GOLDEN, "Archet ensemble render drifted from golden (hash {h:#018x})");
     }
 }
@@ -2912,7 +2910,7 @@ mod golden_audio {
         }
         let h = crate::fingerprint::of(&left);
         eprintln!("GOLDEN = {h:#018x}");
-        assert_eq!(h, 0x3db1e27b6c43c55a, "the engine's rendered audio changed");
+        assert_eq!(h, 0x30ee3f2e8689e16c, "the engine's rendered audio changed");
     }
 }
 
@@ -2957,7 +2955,7 @@ mod fader {
         assert!(peak(settled) > 0.8, "held far under full scale: {}", peak(settled));
     }
 
-    /// The loudest the engine renders, the largest section holding the
+    /// The loudest the bank holds, the largest section holding the
     /// fullest chord its pool lights at full velocity, peaks just under
     /// full scale on the engine's own scale, the fader idle: that is what
     /// the bow level is set to.

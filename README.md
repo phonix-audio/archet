@@ -43,16 +43,16 @@ snapshot tests and `--check` fails when the pictures fall behind it.
 
 ## Level
 
-The engine's scale is the loudest it can be asked for: the largest
-section, holding the fullest chord its voice pool renders, at full
-velocity, peaks just under full scale. Everything smaller sits below by
-its own physics: a section is as loud as the root of its players, so a
-soloist plays some twenty decibels under a full section, as on a
-recording. No preset carries a level of its own; the level control goes
-to four times, and a track fader does the rest. Behind the sum a fader
-ride holds anything the level control pushes past full scale, at a
-walking pace; the factory bank never reaches it. Nothing in the engine
-clips.
+A section is as loud as the root of its players at a fixed distance,
+but it is recorded from as far as it is wide, and a desk's width grows
+with the root of its players too: a section note reaches the microphone
+at a soloist's level and brings its players as density. On that scale
+the loudest thing in the factory bank, the largest section holding a
+chord at full velocity, peaks just under full scale, and no preset
+carries a level of its own; the level control goes to four times.
+Behind the sum a fader ride, with a short lookahead, holds anything the
+level control pushes past full scale and comes back at a walking pace;
+the factory bank never reaches it. Nothing in the engine clips.
 
 ## Effects
 
