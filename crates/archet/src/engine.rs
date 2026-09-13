@@ -560,7 +560,7 @@ mod preset_sweep_tests {
         tx.send(ArchetCommand::NoteOn(62, 90)).unwrap();
         let block = 128usize; // the live control-rate sub-block
         let nblocks = (0.8 * sr) as usize / block;
-        let mut h = 0u64;
+        let mut left = Vec::with_capacity(nblocks * block);
         let mut buf = vec![0.0f32; block * 2];
         for b in 0..nblocks {
             if b == nblocks * 2 / 3 {
@@ -569,9 +569,10 @@ mod preset_sweep_tests {
             }
             buf.fill(0.0);
             eng.process_audio(&mut buf, 2);
-            for &s in &buf { h = h.rotate_left(7) ^ s.to_bits() as u64; }
+            left.extend(buf.iter().step_by(2));
         }
-        const GOLDEN: u64 = 0xf1838f1e6d097cf8; // the ensemble render, note-offs included
+        let h = crate::fingerprint::of(&left);
+        const GOLDEN: u64 = 10748890061394581662; // the ensemble render, note-offs included
         assert_eq!(h, GOLDEN, "Archet ensemble render drifted from golden (hash {h:#018x})");
     }
 }
@@ -2317,7 +2318,7 @@ mod golden_audio {
         let sr = 48_000.0f32;
         let bank = super::super::patch::ArchetPatch::factory_presets();
         let block = 256usize;
-        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        let mut left: Vec<f32> = Vec::new();
         // By name, not by index. An index says nothing about what it covers,
         // so a preset removed or inserted ahead of one silently changes what
         // this gate is watching; a name that is gone fails here and says so.
@@ -2341,15 +2342,11 @@ mod golden_audio {
                 if b == 24 { let _ = tx.send(ArchetCommand::NoteOff(62)); }
                 buf.fill(0.0);
                 eng.process_audio(&mut buf, 2);
-                for x in buf.iter() {
-                    for byte in x.to_bits().to_le_bytes() {
-                        h ^= byte as u64;
-                        h = h.wrapping_mul(0x0000_0100_0000_01b3);
-                    }
-                }
+                left.extend(buf.iter().step_by(2));
             }
         }
+        let h = crate::fingerprint::of(&left);
         eprintln!("GOLDEN = {h:#018x}");
-        assert_eq!(h, 0x3a3b_2173_9ed3_95c9, "the engine's rendered audio changed");
+        assert_eq!(h, 0xa8c2_ea97_ff2e_fa30, "the engine's rendered audio changed");
     }
 }

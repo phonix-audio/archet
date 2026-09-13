@@ -505,6 +505,6 @@ mod shared_filter_migration {
         let sig = probe();
         let mut body = ModalBody::new(48_000.0, 0, 1.0, 6.0); // violin body
         let o: Vec<f32> = sig.iter().map(|&x| body.process(x)).collect();
-        assert_eq!(hash(&o), 8651240168125589848u64, "archet ModalBody drifted");
+        assert_eq!(crate::fingerprint::of(&o), 6543449001806458770, "archet ModalBody drifted");
     }
 }
