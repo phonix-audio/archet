@@ -78,6 +78,10 @@ a measurement, and what has been tried.
 
 ## Plugin
 
+- A section is as loud as its players' incoherent sum, so the largest
+  sections peak past full scale in the bare engine; the ceiling that
+  holds them is the preset chain's. Init carries no chain, and there the
+  level control is what keeps a large section under full scale.
 - The largest section, thirty-two voices holding a chord, costs about two
   thirds of one core at 48 kHz in a release build (2026-09-13); two such
   instances do not fit on one core.

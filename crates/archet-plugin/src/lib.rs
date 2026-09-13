@@ -755,6 +755,44 @@ mod fx_chain_compat {
         assert_eq!(held.len(), archet::fx::FX_SLOTS);
     }
 
+    /// A chord of the largest section peaks past full scale in the bare
+    /// engine and under the preset's ceiling after its chain.
+    #[test]
+    fn a_section_chord_stays_under_the_preset_ceiling() {
+        use phonix_fx::{Chain, Musical, Transport};
+        let sr = 48_000.0f32;
+        let block = 512usize;
+        let preset = ArchetPatch::factory_presets()
+            .into_iter()
+            .find(|p| p.name == "Violin Section Large")
+            .expect("the bank no longer has Violin Section Large");
+        let (mut eng, tx, _mr) = ArchetEngine::new_for_plugin(sr);
+        tx.send(ArchetCommand::LoadPatch(Box::new(preset.clone()))).unwrap();
+        let mut chain = Chain::new(sr, block);
+        fx::apply(&mut chain, &preset.fx);
+        for n in [60u8, 64, 67, 72] {
+            tx.send(ArchetCommand::NoteOn(n, 120)).unwrap();
+        }
+        let mut buf = vec![0.0f32; block * 2];
+        let (mut l, mut r) = (vec![0.0f32; block], vec![0.0f32; block]);
+        let (mut raw_peak, mut out_peak) = (0.0f32, 0.0f32);
+        for i in 0..((2.0 * sr) as usize / block) {
+            buf.fill(0.0);
+            eng.process_audio(&mut buf, 2);
+            for k in 0..block {
+                l[k] = buf[k * 2];
+                r[k] = buf[k * 2 + 1];
+            }
+            chain.process(&mut l, &mut r, &[], Transport::default(), Musical::default());
+            if i * block > (0.5 * sr) as usize {
+                raw_peak = raw_peak.max(buf.iter().fold(0.0f32, |m, x| m.max(x.abs())));
+                out_peak = out_peak.max(l.iter().chain(r.iter()).fold(0.0f32, |m, x| m.max(x.abs())));
+            }
+        }
+        assert!(raw_peak > 1.0, "the bare engine peaked at {raw_peak}: the ceiling is not what holds it");
+        assert!(out_peak <= 1.0, "past the ceiling: {out_peak}");
+    }
+
     /// Init is the absence of a factory preset: the patch it builds carries
     /// the default chain, and `process` disengages it when the parameter
     /// reads zero, so nothing here may depend on the chain being empty.

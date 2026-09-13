@@ -19,9 +19,6 @@ use super::voice::{ArchetVoice, MAX_VOICES};
 /// level. Both `fire_unison` and the voice-sum norm need it: one to spend
 /// the voices, the other to divide by what a note actually lights.
 const PHYS_CAP: usize = 8;
-/// The most a larger section may add over the voices that render it, in
-/// dB: the incoherent sum of its players, held within the chord headroom.
-const SECTION_GAIN_CAP_DB: f32 = 3.0;
 /// Physical voices a plucked section lights per note.
 const PLUCK_CAP: usize = 4;
 
@@ -173,11 +170,13 @@ impl ArchetEngine {
         // number puts a section note back beside a solo one.
         const CHORD: f32 = 8.0;
         let lit = self.voices_per_note();
-        // A section larger than the voices that render it is louder by the
-        // incoherent sum of its players, within the headroom.
-        let asked = self.patch.ensemble.round().max(1.0);
-        let larger_db = (10.0 * (asked / lit as f32).max(1.0).log10()).min(SECTION_GAIN_CAP_DB);
-        let norm = (1.0 / (CHORD * lit as f32).sqrt()) * 10f32.powf(larger_db / 20.0) * self.patch.output_level;
+        // A section is as loud as its players' incoherent sum, the root of
+        // their number (Meyer): the voices that render it already sum so,
+        // and a section larger than them gets the rest as gain. A chain's
+        // ceiling holds it in a preset; in Init the level control does.
+        let asked = if self.patch.ensemble >= 1.5 { self.patch.ensemble.round().max(2.0) } else { 1.0 };
+        let larger = (asked / lit as f32).max(1.0).sqrt();
+        let norm = (1.0 / CHORD.sqrt()) * larger * self.patch.output_level;
         // The open strings a plucked note occupies right now cannot ring in
         // sympathy: they are the strings sounding, under a finger or plucked.
         let mut held = [false; 4];
@@ -224,8 +223,11 @@ impl ArchetEngine {
             // is one tail and does not branch on the stroke. The tail is a
             // global resonance: driven by the mono sum, added centered.
             let tail = self.symp.process(mono) * self.symp_level;
-            let l = (sl + tail).clamp(-1.0, 1.0);
-            let r = (sr_ + tail).clamp(-1.0, 1.0);
+            // Unclamped: a large section rightly peaks past full scale, and
+            // the ceiling that holds it is the preset chain's, after the
+            // engine; a hard clip here would crack before it could act.
+            let l = sl + tail;
+            let r = sr_ + tail;
 
             self.peak_l = self.peak_l.max(l.abs());
             self.peak_r = self.peak_r.max(r.abs());
@@ -608,7 +610,7 @@ mod preset_sweep_tests {
             left.extend(buf.iter().step_by(2));
         }
         let h = crate::fingerprint::of(&left);
-        const GOLDEN: u64 = 0x0463cb5a6c7359c7; // the ensemble render, note-offs included
+        const GOLDEN: u64 = 0x62eb6170e3dcca50; // the ensemble render, note-offs included
         assert_eq!(h, GOLDEN, "Archet ensemble render drifted from golden (hash {h:#018x})");
     }
 }
@@ -1962,6 +1964,15 @@ mod profile {
             "  {lit} voices lit: {secs:.1} s of audio in {wall:.2} s, {:.0} % of one core",
             100.0 * wall / secs
         );
+        // The chord's peak over its last second, what a chain's ceiling
+        // would have to hold.
+        let mut peak = 0.0f32;
+        for _ in 0..((1.0 * sr) as usize / block) {
+            buf.fill(0.0);
+            eng.process_audio(&mut buf, 2);
+            peak = peak.max(buf.iter().fold(0.0f32, |m, x| m.max(x.abs())));
+        }
+        println!("  four-note chord peak in the bare engine: {peak:.2}");
     }
 
     /// A held bowed note at three dynamics, for comparison with a recording.
@@ -2707,6 +2718,6 @@ mod golden_audio {
         }
         let h = crate::fingerprint::of(&left);
         eprintln!("GOLDEN = {h:#018x}");
-        assert_eq!(h, 0x3452568fbd416118, "the engine's rendered audio changed");
+        assert_eq!(h, 0xdd2f2f52007fa6e4, "the engine's rendered audio changed");
     }
 }
