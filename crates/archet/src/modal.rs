@@ -57,6 +57,9 @@ pub struct ModalString {
     pub release_damp: f32, // per-sample extra state decay on bow-off (1.0 = natural ring)
     rng: u32,
     pub slipping: bool,
+    /// Samples processed and samples spent slipping since last read.
+    pub steps: u32,
+    pub slips: u32,
     // ── string/fret unilateral CONTACT (slap bass, IRCAM Modalys style) ──────
     // A barrier placed at string fraction fret_beta. When the vibrating string
     // penetrates it, a clamp force is applied across ALL modes (coupling them -> the
@@ -87,6 +90,7 @@ impl ModalString {
             b00: 1.0_f64,
             mu_s: 0.8, mu_d: 0.3, v0: 0.10,
             beta: 0.10, noise_amt: 0.0, release_damp: 1.0, rng: 0x1234_5678, slipping: false,
+            steps: 0, slips: 0,
             fret_phi: vec![0.0; MAX_MODES], fret_frac: 0.5, fret_hard: 0.0,
             fret_norm: 1.0, disp_env: 0.0, fret_on: false,
         };
@@ -419,6 +423,8 @@ impl ModalString {
                 }
             }
         }
+        self.steps = self.steps.wrapping_add(1);
+        self.slips = self.slips.wrapping_add(self.slipping as u32);
         // slip noise: friction is roughened during slip (Demoucron, N(t)=1-A*u)
         if self.slipping && self.noise_amt > 0.0 {
             let u = (self.rand() * 0.5 + 0.5).clamp(0.0, 1.0); // [0,1]

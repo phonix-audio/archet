@@ -1577,6 +1577,73 @@ mod profile {
         println!("  (dB against the level before the second attack; columns at +150 and +300 ms)");
     }
 
+    /// A held bowed note at three dynamics, for comparison with a recording.
+    ///
+    /// The solo violin patch holds a B flat on the A string, a stopped note
+    /// so the vibrato is in play, for eight seconds, then the bow lifts.
+    /// Written to /tmp/archet_bow_held_<velocity>.wav.
+    ///   cargo test --lib engine::profile::bow_held -- --ignored --nocapture
+    #[test]
+    #[ignore = "diagnostic — run with --ignored"]
+    fn bow_held() {
+        let sr = 48_000.0_f32;
+        let block = 512usize;
+        let bank = crate::patch::ArchetPatch::factory_presets();
+        let preset = bank
+            .iter()
+            .find(|p| p.name == "Violin Solo")
+            .expect("the bank no longer has Violin Solo");
+        let note = 70u8;
+        // Renders at the middle velocity with the vibrato off, for the
+        // recordings that are played without one, at the preset's bow force
+        // and at multiples of it.
+        let mut runs = vec![(50u8, true, 1.0f32), (85, true, 1.0), (120, true, 1.0)];
+        for scale in [1.0f32] {
+            runs.push((85, false, scale));
+        }
+        for (vel, vib, force_scale) in runs {
+            let (mut eng, tx, _mr) = ArchetEngine::new_for_plugin(sr);
+            let mut p = preset.clone();
+            if !vib {
+                p.vib_depth = 0.0;
+                p.bow_force *= force_scale;
+            }
+            tx.send(ArchetCommand::LoadPatch(Box::new(p))).unwrap();
+            let mut buf = vec![0.0f32; block * 2];
+            eng.process_audio(&mut buf, 2);
+            tx.send(ArchetCommand::NoteOn(note, vel)).unwrap();
+            let mut out: Vec<f32> = Vec::new();
+            let hold = (8.0 * sr) as usize / block;
+            let tail = (1.5 * sr) as usize / block;
+            let quarter = (0.25 * sr) as usize / block;
+            let mut states = Vec::new();
+            for i in 0..hold + tail {
+                if i == hold {
+                    tx.send(ArchetCommand::NoteOff(note)).unwrap();
+                }
+                buf.fill(0.0);
+                eng.process_audio(&mut buf, 2);
+                for k in 0..block {
+                    out.push(buf[k * 2]);
+                }
+                if (i + 1) % quarter == 0 && i < hold {
+                    if let Some(v) = eng.voices.iter_mut().find(|v| v.is_active()) {
+                        let (slip, force, speed) = v.bow_state();
+                        states.push(format!("{:.0}%/{force:.2}/{speed:.2}", slip * 100.0));
+                    }
+                }
+            }
+            if !vib {
+                println!("  force x{force_scale}: slipping share / bow force / bow speed per quarter second:");
+                println!("  {}", states.join(" "));
+            }
+            let path = format!("/tmp/archet_bow_held_{vel}{}.wav", if vib { String::new() } else { format!("_novib_x{force_scale}") });
+            write_wav(&path, &out, sr);
+            let peak = out.iter().fold(0.0f32, |m, x| m.max(x.abs()));
+            println!("  velocity {vel}: peak {peak:.4}, wrote {path}");
+        }
+    }
+
     /// A scored piece, desk by desk, on the solo patches.
     ///
     /// Each desk gets an engine on its instrument's bowed patch and one on

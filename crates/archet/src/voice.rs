@@ -513,6 +513,16 @@ impl ArchetVoice {
             _ => 0.18 * low,  // contrabass: support, well back
         }
     }
+    /// The share of samples the bowed string spent slipping since the last
+    /// call, with the bow's force and speed now, for diagnostics.
+    #[cfg(test)]
+    pub(crate) fn bow_state(&mut self) -> (f32, f32, f32) {
+        let frac = self.modal.slips as f32 / self.modal.steps.max(1) as f32;
+        self.modal.slips = 0;
+        self.modal.steps = 0;
+        (frac, self.bow_force, self.bow_vel)
+    }
+
     fn modal_params(body_index: usize, freq: f32) -> (f32, f32, f32, f32) {
         // Clean+bright regime: low B2 (bright Helmholtz corner) is CLEAN because the
         // stiffness is realistic (~1-5e-5) -- the old ~1e-3 stiffness scattered the high
