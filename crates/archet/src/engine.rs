@@ -585,7 +585,7 @@ mod preset_sweep_tests {
             eng.process_audio(&mut buf, 2);
             for &s in &buf { h = h.rotate_left(7) ^ s.to_bits() as u64; }
         }
-        const GOLDEN: u64 = 0x1903ad5997132408; // the ensemble render, note-offs included
+        const GOLDEN: u64 = 0xdb0b43d7b4446e55; // the ensemble render, note-offs included
         assert_eq!(h, GOLDEN, "Archet ensemble render drifted from golden (hash {h:#018x})");
     }
 }
@@ -1383,7 +1383,7 @@ mod profile {
             };
             let on = (n.onset + late).max(0.0);
             let (dynamic, accent) = &curves[n.desk];
-            let acc = if accent[bar] { 12 } else { 0 };
+            let acc = if accent[bar] { 16 } else { 0 };
             let vel = (dynamic[bar] + acc + lean + VOICE[n.desk]).clamp(1, 127) as u8;
             let sounding = if piece.desks[n.desk] == "bass" { n.midi - 12 } else { n.midi };
             s.push((n.desk, on, sounding, vel, n.len, n.art));
@@ -1394,17 +1394,18 @@ mod profile {
     /// The velocity of each bar from a set of marks, with the bars that
     /// carry an accent. Bars are 1-based; index 0 is unused.
     fn dynamics(bars: usize, marks: &[(usize, &str)]) -> (Vec<i32>, Vec<bool>) {
-        const SWELL: i32 = 24;
+        const SWELL: i32 = 40;
+        // The marks span the velocity range evenly, ppp to fff.
         let level_of = |m: &str| -> Option<i32> {
             Some(match m {
-                "ppp" => 36,
-                "pp" => 48,
-                "p" => 62,
-                "mp" => 72,
-                "mf" => 82,
-                "f" => 92,
-                "ff" => 104,
-                "fff" => 116,
+                "ppp" => 16,
+                "pp" => 32,
+                "p" => 48,
+                "mp" => 64,
+                "mf" => 80,
+                "f" => 96,
+                "ff" => 112,
+                "fff" => 127,
                 _ => return None,
             })
         };
@@ -1412,8 +1413,8 @@ mod profile {
         marks.sort_by_key(|m| m.0);
         // Level marks carry forward; a hairpin then bends the bars between
         // itself and the next mark.
-        let mut dynamic = vec![62i32; bars + 2];
-        let mut current = 62;
+        let mut dynamic = vec![48i32; bars + 2];
+        let mut current = 48;
         for bar in 1..=bars {
             for &(b, m) in &marks {
                 if b == bar {
@@ -1597,9 +1598,9 @@ mod profile {
         // Renders at the middle velocity with the vibrato off, for the
         // recordings that are played without one, at the preset's bow force
         // and at multiples of it.
-        let mut runs = vec![(50u8, true, 1.0f32), (85, true, 1.0), (120, true, 1.0)];
+        let mut runs = vec![(32u8, true, 1.0f32), (80, true, 1.0), (112, true, 1.0)];
         for scale in [1.0f32] {
-            runs.push((85, false, scale));
+            runs.push((80, false, scale));
         }
         for (vel, vib, force_scale) in runs {
             let (mut eng, tx, _mr) = ArchetEngine::new_for_plugin(sr);
@@ -2370,6 +2371,6 @@ mod golden_audio {
             }
         }
         eprintln!("GOLDEN = {h:#018x}");
-        assert_eq!(h, 0x56e3_c412_c7ca_f227, "the engine's rendered audio changed");
+        assert_eq!(h, 0xa553_6fac_fd03_af44, "the engine's rendered audio changed");
     }
 }

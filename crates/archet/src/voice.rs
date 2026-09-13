@@ -40,6 +40,12 @@ impl Noise {
 const PRESS_SOFT: f32 = 2.0;
 const PRESS_LOUD: f32 = 4.0;
 
+/// The bow speed range over the whole velocity range, in dB: a violin's
+/// dynamic range from its softest to its loudest (Meyer, Acoustics and the
+/// Performance of Music, about 25 dB; the anechoic recordings put 16 dB
+/// between pp and ff).
+const SPEED_RANGE_DB: f32 = 26.0;
+
 /// 1/f (pink) noise: octave-spaced one-pole-filtered white sources summed
 /// (Voss-McCartney-style). Natural/musical fluctuations are 1/f, not white or
 /// smooth -- this is what the ear reads as a *living* instrument rather than a
@@ -603,7 +609,11 @@ impl ArchetVoice {
         let ens = patch.ensemble >= 1.5;
         let js = if ens { 2.4 } else { 1.0 }; // per-voice variation scale
         self.bow_force_target = patch.bow_force * press * (1.0 + r3 * 0.07 * js);
-        self.bow_vel_target = patch.bow_vel * (0.5 + 0.5 * v) * bright.sqrt() * (1.0 + r4 * 0.08 * js);
+        // Loudness follows the bow speed (Helmholtz amplitude is the speed
+        // over the bow position), so the dynamic is a speed, logarithmic
+        // in the velocity over the instrument's whole range.
+        let speed = 10f32.powf((v - 1.0) * SPEED_RANGE_DB / 20.0);
+        self.bow_vel_target = patch.bow_vel * speed * bright.sqrt() * (1.0 + r4 * 0.08 * js);
         self.note_attack = (patch.attack * (1.6 - 0.8 * v) * (1.0 + r1 * 0.15 * js)).clamp(0.010, 0.14);
         // desynchronized, continuous, deeper vibrato for the section
         if ens {
