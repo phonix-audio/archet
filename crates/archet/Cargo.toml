@@ -1,6 +1,6 @@
 [package]
 name        = "archet"
-description = "A bowed string: violin, viola, cello and double bass, as a digital waveguide through a procedural modal body, arco or pizzicato."
+description = "A bowed string: violin, viola, cello and double bass, a modal string under a bow or a finger, through a body of measured modes."
 readme      = "../../README.md"
 keywords    = ["audio", "dsp", "synthesis"]
 categories  = ["multimedia::audio"]
