@@ -527,18 +527,19 @@ impl ArchetVoice {
     }
     /// The instruments' relative levels: the melody instruments forward,
     /// the bass instruments back.
-    /// The four instruments at the same loudness: a violin, a viola, a
-    /// cello and a double bass play at comparable sound levels (Meyer,
-    /// Acoustics and the Performance of Music), and a desk's balance is
-    /// the player's level control, not the instrument's. The figures undo
-    /// what each measured body takes from the string's level, so a note at
-    /// the same velocity reads the same on each.
-    fn inst_level(idx: usize) -> f32 {
+    /// The four instruments at the same level: a violin, a viola, a cello
+    /// and a double bass play at comparable sound levels (Meyer, Acoustics
+    /// and the Performance of Music), and a desk's balance is the player's
+    /// level control, not the instrument's. Each figure brings the mean
+    /// power of five notes spanning the instrument's own register, at one
+    /// velocity, to the violin's; engine::profile::inst_balance measures
+    /// it and prints the figure that would hold.
+    pub(crate) fn inst_level(idx: usize) -> f32 {
         match idx {
             0 => 1.00,
-            1 => 0.97,
-            2 => 1.45,
-            _ => 2.85,
+            1 => 1.01,
+            2 => 0.41,
+            _ => 0.29,
         }
     }
     /// The share of samples the bowed string spent slipping since the last

@@ -1138,6 +1138,46 @@ mod profile {
         }
     }
 
+    /// The four instruments across their own registers at the same
+    /// velocity: the mean rms of five notes spanning each range, and the
+    /// level that would bring it to the violin's.
+    ///   cargo test --lib engine::profile::inst_balance -- --ignored --nocapture
+    #[test]
+    #[ignore = "diagnostic - run with --ignored"]
+    fn inst_balance() {
+        let sr = 48_000.0_f32;
+        let block = 512usize;
+        let mk = [ArchetPatch::violin(), ArchetPatch::viola(), ArchetPatch::cello(), ArchetPatch::double_bass()];
+        let registers: [[u8; 5]; 4] = [[55, 62, 69, 76, 83], [48, 55, 62, 69, 76], [36, 43, 50, 57, 64], [28, 35, 42, 49, 55]];
+        let mut mean = [0.0f32; 4];
+        println!("  {:<12} {:>5} {:>8} {:>8}", "instrument", "note", "peak dB", "rms dB");
+        for (i, (p, reg)) in mk.iter().zip(registers).enumerate() {
+            for note in reg {
+                let (mut eng, tx, _mr) = ArchetEngine::new_for_plugin(sr);
+                tx.send(ArchetCommand::LoadPatch(Box::new(p.clone()))).unwrap();
+                tx.send(ArchetCommand::NoteOn(note, 100)).unwrap();
+                let mut out: Vec<f32> = Vec::new();
+                let mut buf = vec![0.0f32; block * 2];
+                for _ in 0..((1.5 * sr) as usize / block) {
+                    buf.fill(0.0);
+                    eng.process_audio(&mut buf, 2);
+                    out.extend(buf.iter().step_by(2));
+                }
+                let w = &out[(0.5 * sr) as usize..];
+                let peak = w.iter().fold(0.0f32, |m, x| m.max(x.abs()));
+                let sq = w.iter().map(|x| x * x).sum::<f32>() / w.len() as f32;
+                mean[i] += sq / reg.len() as f32;
+                println!("  {:<12} {:>5} {:>8.1} {:>8.1}", p.name, note,
+                         20.0 * peak.max(1e-9).log10(), 10.0 * sq.max(1e-18).log10());
+            }
+        }
+        println!("  {:<12} {:>9} {:>12}", "instrument", "mean dB", "level x");
+        for (i, p) in mk.iter().enumerate() {
+            println!("  {:<12} {:>9.1} {:>12.3}", p.name, 10.0 * mean[i].max(1e-18).log10(),
+                     (mean[0] / mean[i]).sqrt() * crate::voice::ArchetVoice::inst_level(p.instrument.body_index()));
+        }
+    }
+
     /// Headroom on a dense chord, which is where a solo patch has no guard.
     ///
     /// The voice-sum norm divides by the voices one NOTE lights, so a solo
@@ -2718,6 +2758,6 @@ mod golden_audio {
         }
         let h = crate::fingerprint::of(&left);
         eprintln!("GOLDEN = {h:#018x}");
-        assert_eq!(h, 0xdd2f2f52007fa6e4, "the engine's rendered audio changed");
+        assert_eq!(h, 0x3293e0b64bb23f5c, "the engine's rendered audio changed");
     }
 }
