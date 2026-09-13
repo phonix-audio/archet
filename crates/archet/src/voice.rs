@@ -46,6 +46,20 @@ const PRESS_LOUD: f32 = 4.0;
 /// between pp and ff).
 const SPEED_RANGE_DB: f32 = 26.0;
 
+/// The cycle-to-cycle spread of a violin vibrato's period and extent, as
+/// fractions, measured on a recorded held note with a normal vibrato
+/// (Philharmonia Orchestra sound samples, violin B flat 4, long, arco).
+const VIB_PERIOD_SPREAD: f32 = 0.033;
+const VIB_EXTENT_SPREAD: f32 = 0.10;
+
+/// Slow intonation drift: the corner of a one-pole walk and its rms in
+/// cents for a soloist (recorded held notes move by one to three cents rms
+/// below 1.5 Hz) and for each player of a section (the time-varying part
+/// of the measured inter-player spread).
+const DRIFT_HZ: f32 = 0.4;
+const DRIFT_SOLO_CENTS: f32 = 2.0;
+const DRIFT_SECTION_CENTS: f32 = 6.0;
+
 /// 1/f (pink) noise: octave-spaced one-pole-filtered white sources summed
 /// (Voss-McCartney-style). Natural/musical fluctuations are 1/f, not white or
 /// smooth -- this is what the ear reads as a *living* instrument rather than a
@@ -109,7 +123,8 @@ pub struct ArchetVoice {
     grit_bp: Biquad,  // low "grit" band (~520 Hz) -- the bow grabbing the string
     // humanization (separate noise stream so it doesn't colour the bow scratch)
     hum: Noise,
-    wander: f32,       // slow random drift of vibrato rate/depth
+    vib_cycle_rate: f32,  // this vibrato cycle's rate, around the note's
+    vib_cycle_depth: f32, // this vibrato cycle's extent, around the note's
     flutter: f32,      // fast micro-pitch jitter
     vib_rate_jit: f32, // per-note vibrato-rate multiplier
     vib_depth_jit: f32,// per-note vibrato-depth multiplier
@@ -224,7 +239,8 @@ impl ArchetVoice {
             noise_bp: Biquad::bandpass(sr, 2800.0, 1.1),
             grit_bp: Biquad::bandpass(sr, 520.0, 0.9),
             hum: Noise::new(0x1234_5678 ^ ((voice_idx as u32).wrapping_mul(40503))),
-            wander: 0.0,
+            vib_cycle_rate: 1.0,
+            vib_cycle_depth: 1.0,
             flutter: 0.0,
             vib_rate_jit: 1.0,
             vib_depth_jit: 1.0,
@@ -841,7 +857,8 @@ impl ArchetVoice {
         self.friction.mode = patch.friction.into();
         self.friction.slope = patch.slope.max(0.5);
         self.friction.reset();
-        self.wander = 0.0;
+        self.vib_cycle_rate = 1.0;
+        self.vib_cycle_depth = 1.0;
         self.flutter = 0.0;
     }
 
@@ -1122,35 +1139,35 @@ impl ArchetVoice {
                 self.amp_env = (self.amp_env + dt / 0.005).min(1.0);
             }
 
-            // Living vibrato: delayed fade-in, ~6 Hz FM, but humanized so it never
-            // sits perfectly still -- slow wander of rate/depth, a fast flutter, and
-            // a non-sinusoidal shape (real violin vibrato is asymmetric).
-            self.wander += (self.hum.next() * 0.5 - self.wander) * 0.03; // slow drift
+            // Vibrato: delayed fade-in; a rate and an extent drawn afresh at
+            // each cycle around the note's own, by the cycle-to-cycle spread
+            // of a recorded vibrato; a fast flutter; and a non-sinusoidal
+            // shape (a violinist's vibrato is asymmetric).
             self.flutter += (self.hum.next() - self.flutter) * 0.30; // fast micro-jitter
-            let rate = patch.vib_rate * self.vib_rate_jit * (1.0 + self.wander * 0.07);
+            let rate = patch.vib_rate * self.vib_rate_jit * self.vib_cycle_rate;
             self.vib_phase += rate * dt;
             if self.vib_phase >= 1.0 {
                 self.vib_phase -= 1.0;
+                // A uniform draw in [-1, 1] has a third of unit variance.
+                let unit = 3f32.sqrt();
+                self.vib_cycle_rate = 1.0 + self.hum.next() * unit * VIB_PERIOD_SPREAD;
+                self.vib_cycle_depth = 1.0 + self.hum.next() * unit * VIB_EXTENT_SPREAD;
             }
             let vib_env = ((self.note_time - patch.vib_delay) / 0.4).clamp(0.0, 1.0);
             let ph = self.vib_phase * std::f32::consts::TAU;
             // sine + a touch of 2nd harmonic -> the asymmetric violinist vibrato shape
             let lfo = ph.sin() + 0.13 * (ph * 2.0).sin();
-            let depth = patch.vib_depth * self.vib_depth_jit * self.vib_amt * (1.0 + self.wander * 0.12);
+            let depth = patch.vib_depth * self.vib_depth_jit * self.vib_amt * self.vib_cycle_depth;
             // 1/f pitch jitter (natural micro-detuning) on top of the vibrato.
             let jitter = self.pink_pitch.next() * 3.5 * alive; // +/-~3.5 cents, pink (register-scaled)
-            // SLOW INTONATION DRIFT (ensemble only, research param): each
-            // player wanders independently in/out of tune over seconds (~0.4
-            // Hz one-pole on white -> ~6 cents RMS, peaks ~±18c). This is the
-            // measured 20-30c inter-player F0 dispersion's TIME-VARYING part,
-            // the cue that makes partials continuously cross (a real section)
-            // rather than sit in a static detuned chord (a fat unison).
-            let drift_cents = if patch.ensemble >= 1.5 {
-                self.drift += (self.hum.next() - self.drift) * 5.24e-5; // ~0.4 Hz
-                self.drift * 2000.0
-            } else {
-                0.0 // solo: no drift, and don't perturb the hum stream
-            };
+            // Slow intonation drift, a one-pole walk over seconds: a soloist
+            // moves by a couple of cents rms, the players of a section, each
+            // on their own, by more, so their partials keep crossing.
+            let pole = std::f32::consts::TAU * DRIFT_HZ * dt;
+            self.drift += (self.hum.next() - self.drift) * pole;
+            let unit_rms = (pole / (2.0 - pole)).sqrt() / 3f32.sqrt();
+            let drift_cents = self.drift / unit_rms
+                * if patch.ensemble >= 1.5 { DRIFT_SECTION_CENTS } else { DRIFT_SOLO_CENTS };
             let cents = lfo * depth * vib_env + self.flutter * 0.8 * alive + jitter + drift_cents;
             self.bend = 2f32.powf(cents / 1200.0);
             // LEGATO GLIDE: ramp freq_hz toward freq_target over ~20 ms (the smooth-slur
