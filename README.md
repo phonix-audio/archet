@@ -32,12 +32,31 @@ string instead of where the bow crosses it.
 
 ![The editor, plucked](docs/screenshots/archet_pizzicato.png)
 
+Behind a switch, the effects the patch carries: an equaliser that ships
+flat, the space the string radiates into, and a ceiling. Which three and
+in what order is fixed; everything inside them is the player's.
+
+![The editor, effects](docs/screenshots/archet_effects.png)
+
 `scripts/screenshots.sh` renders these headless from the editor's own
 snapshot tests and `--check` fails when the pictures fall behind it.
 
+## Effects
+
+The engine owns no effects. Each patch describes a chain of three, in a
+fixed order, that the plugin runs after the engine: a parametric
+equaliser, flat by design since the bodies are calibrated on recordings;
+a reverb, because a string radiates into a room and the model has no
+walls of its own, set per preset to a chamber for a soloist, a hall for a
+section, a concert hall for a full string body and a room for plucked
+strings; and a brickwall ceiling, the same for every preset. The chain is
+part of the patch and travels with a project; a project saved before it
+existed carries an empty chain, which is a real no-op. `COMPAT.md` says
+what of this is frozen.
+
 ## Layout
 
-    crates/archet            the engine. serde is its only dependency.
+    crates/archet            the engine, and the chain it describes but never runs
     crates/archet-ui         the egui editor
     crates/archet-plugin     VST3 / CLAP, via nice-plug
     vendor/phonix-sdk        the shared phonix crates, vendored
