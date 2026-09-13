@@ -1,60 +1,19 @@
-Archet is licensed under the MIT License (see LICENSE).
+Archet
+Copyright (c) 2026 Phonix Audio
+Licensed under MIT or Apache-2.0, at your option (LICENSE-MIT, LICENSE-APACHE).
 
-The model rests on published work. It does not copy code from these
-sources; it implements what they describe and takes its figures from what
-they measured.
+This repository carries work by others under their own terms:
 
-Bowed string
-- M. Demoucron, On the control of virtual violins, thesis, IRCAM / KTH,
-  2008: the modal string with a one-point friction interaction and the
-  bridge-force output.
-- Friedlander; McIntyre, Schumacher and Woodhouse: the graphical solution
-  of the friction interaction.
-- J. C. Schelleng, The bowed string and the player, JASA 1973: the window
-  of bow force in which the string sustains Helmholtz motion.
-- A. Askenfelt, Measurement of the bowing parameters in violin playing,
-  JASA 1986 and 1989.
-- E. Schoonderwaldt, Mechanics and acoustics of violin bowing, thesis,
-  KTH, 2009.
-- J. Meyer, Acoustics and the Performance of Music: the dynamic range of
-  the violin.
-- K. Guettler, On the creation of the Helmholtz motion in bowed strings,
-  Acustica 2002.
-- S. Ternstroem, and R. Cuesta and P. Chandna: the pitch scatter of a
-  section.
-- R. Rasch, Synchronization in performed ensemble music, Acustica 1979:
-  onset asynchrony between players (used by the scored-piece harness).
+  nice-plug (crates nice-plug, nice-plug-egui), the VST3 and CLAP wrapper.
+  Copyright (c) 2022-2024 Robbert van der Helm. ISC License.
+  https://codeberg.org/RustAudio/nice-plug
+  Its `vst3` feature reaches VST3 through vst3-sys, which is GPLv3; a built
+  .vst3 or .clap is therefore distributed under GPLv3 terms. See README.md,
+  "Licence".
 
-Plucked string
-- D. Chadefaux, J.-L. Le Carrou and B. Fabre, Experimentally-based
-  description of harp plucking, JASA 2012: the movement of the plucking
-  point and the pluck as a release.
-- C. Traube, An interdisciplinary study of the timbre of the classical
-  guitar, thesis, McGill, 2004: plucking-point estimation from spectra.
-- N. H. Fletcher and T. D. Rossing, The Physics of Musical Instruments:
-  string lengths and tunings.
+  The Phonix SDK under vendor/phonix-sdk is Phonix Audio's, MIT
+  (vendor/phonix-sdk/LICENSE-MIT).
 
-Bodies
-- J. Woodhouse, The acoustics of the violin: a review, Reports on
-  Progress in Physics 2014: modal overlap above the signature modes.
-- H. Duennwald: the frequency bands of violin quality.
-- G. Bissinger: the damping of violin body modes.
-- A. Askenfelt, Eigenmodes and tone quality of the double bass, STL-QPSR
-  1982, and his chapter in The Science of String Instruments (Rossing
-  ed., 2010).
-- E. Bynum and T. D. Rossing, the cello chapter of the same book; I. M.
-  Firth, 1974, for its mode damping.
-- D. Coffey, 2013, and A. Powell, UC Davis REU report: viola modes.
-
-Recordings used to calibrate (none is redistributed here)
-- University of Iowa Electronic Music Studios, Musical Instrument
-  Samples, Lawrence Fritts: anechoic violin, viola, cello and double bass,
-  plucked and bowed, freely usable.
-- Philharmonia Orchestra sound samples: violin long notes with vibrato,
-  free to use.
-
-Dependencies
-- nice-plug and nice-log (RustAudio), ISC License, Copyright (c)
-  2022-2024 Robbert van der Helm.
-- phonix-sdk, vendored under vendor/, MIT License.
-- The other crates are listed in Cargo.lock under their own licences.
+The model implements published work and was calibrated on published
+recordings; REFERENCES.md says which. No code and no recording is copied
+from them.

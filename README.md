@@ -14,7 +14,7 @@ and double bass, each with its own measured modes; sympathetic open strings
 behind them; a pizzicato that releases the same string from a finger and lets
 it ring with the per-partial decays measured on each open string, then mutes
 it with the hand; and a section mode that renders a decorrelated desk of
-players rather than phase-locked clones. `NOTICE` lists the sources.
+players rather than phase-locked clones. `REFERENCES.md` lists the sources.
 
 ## Layout
 
@@ -58,20 +58,10 @@ that moves it says so.
 
 ## Known limits
 
-Measured against the recordings, and left open because each needs a
-mechanism rather than a figure:
-
-- A bowed note does not brighten with force as a real one does (centroid
-  at ff about 600 Hz against 1100 recorded): the hyperbolic one-point
-  friction does not sharpen the Helmholtz corner. The path is a friction
-  model that does (Smith and Woodhouse 2000; Woodhouse 2003).
-- A plucked attack carries no finger contact or body knock, so the low
-  strings' attacks are 15-24 dB short above 2 kHz on the cello and bass,
-  and the violin A string's attack is duller than recorded.
-- The two transverse planes of a plucked string share one loss table; the
-  bowed string has one plane.
-- Velocity changes the plucked displacement over a narrower range than a
-  harp player's measured one.
+`LIMITATIONS.md` lists what the measurements found and left open, with
+the date of each measurement and what was tried. `REFERENCES.md` lists
+the published work the model implements and the recordings it was
+calibrated on.
 
 ## Compatibility
 
@@ -81,5 +71,16 @@ names *and order*.
 
 ## Licence
 
-MIT, see `LICENSE`. Attributions and the licences of dependencies are in
-`NOTICE`.
+MIT or Apache-2.0, at your option; `LICENSE-MIT` and `LICENSE-APACHE` are
+both here. Third-party work and its terms are listed in `NOTICE`.
+
+One thing to know before redistributing a **built** plugin. The VST3 wrapper
+comes from nice-plug, which reaches VST3 through `vst3-sys`, and `vst3-sys` is
+GPLv3; nice-plug's own manifest says its `vst3` feature "exists mostly for
+GPL-compliance reasons". So the source in this repository is MIT/Apache-2.0, but
+a compiled `.vst3` (and the `.clap` built alongside it, which is the same shared
+object) is a combined work with GPLv3 code and carries GPL-3.0 obligations.
+`scripts/build_plugins.sh` builds both from one cdylib with nice-plug's default
+features, which include `vst3`. A CLAP-only build with that feature turned off
+would link `clap-sys`, which is MIT/Apache-2.0, and nothing GPL; that is the
+switch to reach for if the GPL terms are not wanted.
