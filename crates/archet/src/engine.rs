@@ -65,14 +65,28 @@ pub struct ArchetMeterState {
     pub patch_snapshot: Option<ArchetPatch>,
 }
 
-/// The engine's own ceiling: a fader ride on the summed output. The gain
-/// is one until the sum reaches full scale, then whatever brings the peak
-/// back to it; that peak is held for two periods of the lowest string
-/// sounding, so the gain never moves inside a cycle, and it comes back at
-/// a walking pace once the peak has passed. A section is as loud as its
-/// players up to full scale and only denser past it; a soloist is never
-/// touched. Inter-sample overshoot is left to the chain behind the engine.
+/// The largest section a patch can ask for. The engine's scale is set so
+/// that this section, holding the chord the instrument is voiced for at
+/// full velocity, peaks at full scale; everything smaller sits under it by
+/// its own physics.
+pub const PLAYERS_MAX: f32 = 32.0;
+
+/// The engine's safety: a fader ride on the summed output. The gain is
+/// one until the sum passes full scale, then whatever brings the peak back
+/// to it, reached over a short slope that a lookahead of the same length
+/// hides, so a bridge force's vertical edge is held too; that peak is
+/// held for two periods of the lowest string sounding, so the gain never
+/// moves inside a cycle, and it comes back at a walking pace once the
+/// peak has passed. The factory bank never reaches it; the level control
+/// can. Inter-sample overshoot is left to the chain behind the engine.
 struct Fader {
+    /// The gain applied now.
+    gain: f32,
+    /// Per-sample share of the way to a lower target the gain moves.
+    slope: f32,
+    /// The samples in flight, oldest at `at`.
+    line: [[f32; 2]; Fader::LOOKAHEAD],
+    at: usize,
     /// The highest peak seen since the hold began.
     held: f32,
     /// Samples the held peak is kept before it starts to fall.
@@ -89,9 +103,16 @@ impl Fader {
     const RETURN_DB_PER_S: f32 = 6.0;
     /// Periods of the lowest string the peak is held for.
     const HOLD_PERIODS: f32 = 2.0;
+    /// Samples the output runs behind the gain: the gain's move down is
+    /// four time constants long, and lands before the peak leaves the line.
+    pub const LOOKAHEAD: usize = 32;
 
     fn new(sample_rate: f32) -> Self {
         Self {
+            gain: 1.0,
+            slope: 1.0 - (-4.0 / Self::LOOKAHEAD as f32).exp(),
+            line: [[0.0; 2]; Self::LOOKAHEAD],
+            at: 0,
             held: 0.0,
             hold_left: 0,
             hold: 0,
@@ -104,7 +125,17 @@ impl Fader {
         self.hold = (Self::HOLD_PERIODS * sample_rate / lowest_hz.max(1.0)).ceil() as usize;
     }
 
-    /// The gain for a stereo pair with this peak.
+    /// A stereo pair in, the pair from `LOOKAHEAD` samples ago out, at the
+    /// gain the pair in has moved to.
+    fn run(&mut self, l: f32, r: f32) -> (f32, f32) {
+        let g = self.gain(l.abs().max(r.abs()));
+        let out = self.line[self.at];
+        self.line[self.at] = [l, r];
+        self.at = (self.at + 1) % Self::LOOKAHEAD;
+        (out[0] * g, out[1] * g)
+    }
+
+    /// The gain after a stereo pair with this peak has entered the line.
     fn gain(&mut self, peak: f32) -> f32 {
         if peak >= self.held {
             self.held = peak;
@@ -114,7 +145,13 @@ impl Fader {
         } else {
             self.held *= self.fall;
         }
-        if self.held > 1.0 { 1.0 / self.held } else { 1.0 }
+        let target = if self.held > 1.0 { 1.0 / self.held } else { 1.0 };
+        if target < self.gain {
+            self.gain += (target - self.gain) * self.slope;
+        } else {
+            self.gain = target;
+        }
+        self.gain
     }
 }
 
@@ -221,27 +258,24 @@ impl ArchetEngine {
             return;
         }
 
-        // Two terms, and neither is the polyphony setting, which is how much
+        // Three terms, and none is the polyphony setting, which is how much
         // overlap the player is allowed, not how much sounds.
         //
-        // The first term is a fixed headroom for the notes a player sounds at
-        // once. It cannot follow the live count, which would make a desk pump
-        // as notes enter and leave, and it cannot be dropped: without it two
-        // notes already reach full scale. A chord of this many notes is what
-        // the instrument is voiced to hold.
+        // A section is as loud as its players' incoherent sum, the root of
+        // their number (Meyer): the voices that render a note already sum
+        // so, and a section larger than them gets the rest as gain.
         //
-        // The second is physical: one note of a section lights that many
-        // voices, they sum incoherently, and dividing by the root of their
-        // number puts a section note back beside a solo one.
+        // The scale is the loudest the engine can be asked for: the largest
+        // section holding the chord the instrument is voiced for, at full
+        // velocity, peaks at full scale. Both are fixed: a headroom that
+        // followed the live count would make a desk pump as notes enter and
+        // leave, and one that followed the setting would make a section no
+        // louder than a soloist.
         const CHORD: f32 = 8.0;
         let lit = self.voices_per_note();
-        // A section is as loud as its players' incoherent sum, the root of
-        // their number (Meyer): the voices that render it already sum so,
-        // and a section larger than them gets the rest as gain, up to full
-        // scale, where the fader holds it.
         let asked = if self.patch.ensemble >= 1.5 { self.patch.ensemble.round().max(2.0) } else { 1.0 };
         let larger = (asked / lit as f32).max(1.0).sqrt();
-        let norm = (1.0 / CHORD.sqrt()) * larger * self.patch.output_level;
+        let norm = larger / (CHORD * PLAYERS_MAX).sqrt() * self.patch.output_level;
         // The open strings a plucked note occupies right now cannot ring in
         // sympathy: they are the strings sounding, under a finger or plucked.
         let mut held = [false; 4];
@@ -296,9 +330,7 @@ impl ArchetEngine {
             // is one tail and does not branch on the stroke. The tail is a
             // global resonance: driven by the mono sum, added centered.
             let tail = self.symp.process(mono) * self.symp_level;
-            let g = self.fader.gain((sl + tail).abs().max((sr_ + tail).abs()));
-            let l = (sl + tail) * g;
-            let r = (sr_ + tail) * g;
+            let (l, r) = self.fader.run(sl + tail, sr_ + tail);
 
             self.peak_l = self.peak_l.max(l.abs());
             self.peak_r = self.peak_r.max(r.abs());
@@ -590,6 +622,14 @@ impl ArchetEngine {
         }
     }
 
+    /// The fader's gain now, for measurement.
+    pub fn fader_gain(&self) -> f32 {
+        self.fader.gain
+    }
+
+    /// Samples the output runs behind the notes: the fader's lookahead.
+    pub const LATENCY: usize = Fader::LOOKAHEAD;
+
     /// The voices in use: the polyphony counts notes, and each note lights
     /// its players, up to the pool.
     fn pool(&self) -> usize {
@@ -693,7 +733,7 @@ mod preset_sweep_tests {
             left.extend(buf.iter().step_by(2));
         }
         let h = crate::fingerprint::of(&left);
-        const GOLDEN: u64 = 0x62eb6170e3dcca50; // the ensemble render, note-offs included
+        const GOLDEN: u64 = 0x91957b43891abcd3; // the ensemble render, note-offs included
         assert_eq!(h, GOLDEN, "Archet ensemble render drifted from golden (hash {h:#018x})");
     }
 }
@@ -2872,7 +2912,7 @@ mod golden_audio {
         }
         let h = crate::fingerprint::of(&left);
         eprintln!("GOLDEN = {h:#018x}");
-        assert_eq!(h, 0x3293e0b64bb23f5c, "the engine's rendered audio changed");
+        assert_eq!(h, 0x3db1e27b6c43c55a, "the engine's rendered audio changed");
     }
 }
 
@@ -2902,19 +2942,53 @@ mod fader {
         x.iter().fold(0.0f32, |m, v| m.max(v.abs()))
     }
 
-    /// The largest section holding a chord at full velocity never passes
-    /// full scale, and the fader is what holds it: the same chord with the
-    /// fader's gain undone would.
+    /// The largest section holding a chord at full velocity with the
+    /// level control at its top stays at full scale, within the slope's
+    /// residual, and the fader is what holds it.
     #[test]
     fn a_section_chord_is_held_at_full_scale() {
         let mut p = ArchetPatch::violin();
-        p.ensemble = 30.0;
+        p.ensemble = PLAYERS_MAX;
         p.polyphony = 32;
-        p.output_level = 1.4;
+        p.output_level = 4.0;
         let out = render(p, &[55, 62, 67, 74], 1.5);
-        assert!(peak(&out) <= 1.0, "past full scale: {}", peak(&out));
         let settled = &out[(1.0 * 48_000.0 * 2.0) as usize..];
+        assert!(peak(settled) <= 1.02, "past full scale: {}", peak(settled));
         assert!(peak(settled) > 0.8, "held far under full scale: {}", peak(settled));
+    }
+
+    /// The loudest the engine renders, the largest section holding the
+    /// fullest chord its pool lights at full velocity, peaks just under
+    /// full scale on the engine's own scale, the fader idle: that is what
+    /// the bow level is set to.
+    #[test]
+    fn the_scale_is_the_largest_section() {
+        let sr = 48_000.0f32;
+        let block = 512usize;
+        let mut p = ArchetPatch::violin();
+        p.ensemble = PLAYERS_MAX;
+        p.polyphony = 32;
+        let (mut eng, tx, _mr) = ArchetEngine::new_for_plugin(sr);
+        tx.send(ArchetCommand::LoadPatch(Box::new(p))).unwrap();
+        let mut buf = vec![0.0f32; block * 2];
+        eng.process_audio(&mut buf, 2);
+        let notes = MAX_VOICES / eng.voices_per_note();
+        for (i, n) in [55u8, 62, 67, 74, 79, 86, 91, 98].iter().enumerate() {
+            if i < notes {
+                tx.send(ArchetCommand::NoteOn(*n, 127)).unwrap();
+            }
+        }
+        let mut top = 0.0f32;
+        for i in 0..((1.6 * sr) as usize / block) {
+            buf.fill(0.0);
+            eng.process_audio(&mut buf, 2);
+            assert_eq!(eng.fader_gain(), 1.0, "the fader worked on the engine's own scale");
+            if i * block > (0.4 * sr) as usize {
+                top = top.max(peak(&buf));
+            }
+        }
+        let db = 20.0 * top.log10();
+        assert!((-3.0..=0.0).contains(&db), "the largest section's chord peaks at {db:.1} dBFS");
     }
 
     /// A soloist's note stays under full scale on its own headroom, so
@@ -2937,11 +3011,12 @@ mod fader {
         let sr = 48_000.0f32;
         let mut f = Fader::new(sr);
         f.hold_for(41.2, sr);
-        assert!((f.gain(4.0) - 0.25).abs() < 1e-6);
         let hold = f.hold;
+        let mut g = f.gain(4.0);
         for _ in 0..hold {
-            assert!((f.gain(0.0) - 0.25).abs() < 1e-6, "the hold let go early");
+            g = f.gain(0.0);
         }
+        assert!((g - 0.25).abs() < 1e-2, "the slope did not reach the target within the hold: {g}");
         for _ in 0..(sr as usize) {
             f.gain(0.0);
         }

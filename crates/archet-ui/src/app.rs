@@ -399,12 +399,12 @@ impl ArchetApp {
 
         // The section, and what leaves: the right end of the tier.
         if let Some(nv) = self.knob(ui, geom::section_knob(band, 0), geom::KNOB, "PLAYERS",
-                                    self.patch.ensemble, 0.0, 32.0, "n", BODY) {
+                                    self.patch.ensemble, 0.0, archet::engine::PLAYERS_MAX, "n", BODY) {
             self.set(ArchetParam::Ensemble, nv);
         }
         let mut level = self.patch.output_level;
         if let Some(nv) = self.knob(ui, geom::section_knob(band, 2), geom::KNOB, "LEVEL",
-                                    level, 0.0, 2.0, "n", TRUNK) {
+                                    level, 0.0, 4.0, "n", TRUNK) {
             level = nv;
             self.patch.output_level = nv;
             self.send(ArchetCommand::SetOutputLevel(nv));

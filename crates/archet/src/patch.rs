@@ -228,7 +228,7 @@ impl Default for ArchetPatch {
             vib_rate: 5.8,
             vib_depth: 14.0,
             vib_delay: 0.0,
-            output_level: 0.9,
+            output_level: 1.0,
             vel_sens: 1.0,
             tune_cents: 0.0,
             seed_offset: 0,
@@ -313,7 +313,6 @@ impl ArchetPatch {
             .into_iter()
             .map(|mut p| {
                 p.fx = crate::fx::chain(crate::fx::space_for(&p));
-                p.output_level = PRESET_LEVEL;
                 p
             })
             .collect()
@@ -373,11 +372,6 @@ impl ArchetPatch {
         ]
     }
 }
-
-/// The output level every factory preset ships at. The engine's own
-/// headroom keeps an eight-voice chord of a soloist at full velocity
-/// under full scale, and its fader holds anything past it.
-pub const PRESET_LEVEL: f32 = 1.4;
 
 impl phonix_plugin::preset::Preset for ArchetPatch {
     fn preset_name(&self) -> &str { &self.name }

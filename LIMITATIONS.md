@@ -78,11 +78,12 @@ a measurement, and what has been tried.
 
 ## Plugin
 
-- A section is as loud as its players' incoherent sum, and the largest
-  sections would peak past full scale; the engine's own fader holds them
-  at it, so past full scale more players add density and no level. The
-  fader comes back at 6 dB per second: a soft passage right after a loud
-  one starts held down. Inter-sample overshoot is the preset ceiling's.
+- The engine's scale puts the largest section's fullest chord just under
+  full scale, so a soloist at full velocity peaks near -22 dBFS; the
+  level control reaches +12 dB, not the 22 the physics spans. The fader
+  behind the sum works only past full scale and comes back at 6 dB per
+  second: a soft passage right after a loud one pushed there starts held
+  down. Inter-sample overshoot is the preset ceiling's.
 - The largest section, thirty-two voices holding a chord, costs about a
   third of one core at 48 kHz in a release build (2026-09-14), the modal
   string now the larger half of a voice; three such instances do not fit

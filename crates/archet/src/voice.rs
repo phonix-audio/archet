@@ -40,8 +40,9 @@ const PRESS_LOUD: f32 = 4.0;
 
 /// The bowed bridge force's share of the working level: with the force in
 /// its window a voice carries a full Helmholtz amplitude, and one voice at
-/// full velocity must peak where the engine's voice-sum norm leaves an
-/// eight-voice chord under full scale.
+/// full velocity must peak where the engine's norm puts the largest
+/// section's reference chord at full scale. The plugin's bank guard
+/// measures it on the loudest factory preset.
 const BOW_LEVEL: f32 = 0.5;
 
 /// The bow speed range over the whole velocity range, in dB: a violin's

@@ -43,11 +43,16 @@ snapshot tests and `--check` fails when the pictures fall behind it.
 
 ## Level
 
-The engine rides its own fader: the summed output is held at full scale
-whatever the section or the level asks, with the gain kept for two
-periods of the lowest string sounding and returned at a walking pace, so
-a section grows louder with its players until full scale and only denser
-past it. Nothing in the engine clips.
+The engine's scale is the loudest it can be asked for: the largest
+section, holding the fullest chord its voice pool renders, at full
+velocity, peaks just under full scale. Everything smaller sits below by
+its own physics: a section is as loud as the root of its players, so a
+soloist plays some twenty decibels under a full section, as on a
+recording. No preset carries a level of its own; the level control goes
+to four times, and a track fader does the rest. Behind the sum a fader
+ride holds anything the level control pushes past full scale, at a
+walking pace; the factory bank never reaches it. Nothing in the engine
+clips.
 
 ## Effects
 
