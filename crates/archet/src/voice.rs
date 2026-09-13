@@ -475,7 +475,7 @@ impl ArchetVoice {
     /// until the body is measured.
     fn attack_corner(body_index: usize, string: usize) -> f32 {
         const HZ: [[f32; 4]; 4] = [
-            [663.0, 353.0, 20000.0, 20000.0], // violin G D A E
+            [900.0, 1000.0, 20000.0, 20000.0], // violin G D A E
             [566.0, 1091.0, 1246.0, 1573.0],  // viola C G D A
             [463.0, 1496.0, 2086.0, 1857.0],  // cello C G D A
             [2276.0, 3039.0, 1593.0, 5414.0], // double bass E A D G, D alone calibrated
@@ -752,14 +752,17 @@ impl ArchetVoice {
             // Experimentally-based description of harp plucking, JASA 2012). So
             // draw it per note over that span, which leaves the comb in place
             // for each note and moves it from note to note, as a hand does. No
-            // published measurement pins the spot for a violin, so it stays at
-            // a fifth of the open length. The spread is half a percent each
-            // way, and the fraction folds about the middle, where the comb is
-            // symmetric.
+            // published measurement pins the spot for a violin; the depth of
+            // the fifth partial on the four recorded open strings, never
+            // absent, puts it between a sixth and a fifth of the length, and
+            // the median of the four is used. The spread is half a percent
+            // each way, and the fraction folds about the middle, where the
+            // comb is symmetric.
+            const SPOT: f32 = 0.185;
             let (string, f_open, _) = Self::string_for(self.inst_idx, note);
             self.on_string = Some((self.inst_idx, string));
             self.stopped = false;
-            let spot = 0.20 * Self::freq_of(note) / f_open;
+            let spot = SPOT * Self::freq_of(note) / f_open;
             let spot = if spot > 0.5 { 1.0 - spot } else { spot };
             let p = (spot + self.hum.next() * 0.005).clamp(0.02, 0.5);
             // (b) the same string the bow uses, with the same stiffness law.
