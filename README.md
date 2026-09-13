@@ -16,6 +16,25 @@ it ring with the per-partial decays measured on each open string, then mutes
 it with the hand; and a section mode that renders a decorrelated desk of
 players rather than phase-locked clones. `REFERENCES.md` lists the sources.
 
+## The editor
+
+Three bands. The bow: where it crosses the string, from sul tasto to sul
+ponticello, how hard and how fast, with the friction model and the noise
+and damping of the stroke. The body: which of the four, its response with
+the bridge hill drawn, and the torsion under it. The player: attack and
+release, the vibrato, the dynamics, the size of the section, the level.
+The keyboard below plays it.
+
+![The editor, bowing](docs/screenshots/archet_arco.png)
+
+The same instrument plucked: the band shows where the finger takes the
+string instead of where the bow crosses it.
+
+![The editor, plucked](docs/screenshots/archet_pizzicato.png)
+
+`scripts/screenshots.sh` renders these headless from the editor's own
+snapshot tests and `--check` fails when the pictures fall behind it.
+
 ## Layout
 
     crates/archet            the engine. serde is its only dependency.
