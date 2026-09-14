@@ -75,8 +75,15 @@ pub const PLAYERS_MAX: f32 = 32.0;
 /// string. What holds a peak holds it for two of its periods.
 pub const LOWEST_HZ: f32 = 41.2;
 
+/// Frames a voice's line holds: the most the engine renders in one call.
+pub const SCRATCH_FRAMES: usize = 4096;
+
 pub struct ArchetEngine {
     voices: Vec<ArchetVoice>,
+    /// One block of each voice's output, rendered before the sum.
+    lines: Vec<Vec<f32>>,
+    /// Each voice's constant-power gains for the block, reserved once.
+    pans: Vec<(f32, f32)>,
     /// The pitch bend as a frequency factor, and the modulation wheel.
     bend: f32,
     wheel: f32,
@@ -115,6 +122,8 @@ impl ArchetEngine {
     ) -> Self {
         Self {
             voices: (0..MAX_VOICES).map(|i| ArchetVoice::new(sample_rate, i)).collect(),
+            lines: (0..MAX_VOICES).map(|_| vec![0.0f32; SCRATCH_FRAMES]).collect(),
+            pans: Vec::with_capacity(MAX_VOICES),
             bend: 1.0,
             wheel: 0.0,
             held_keys: Vec::new(),
@@ -163,6 +172,13 @@ impl ArchetEngine {
         phonix_rt::denormal::enable_flush_to_zero();
         let started = std::time::Instant::now();
         let frames = output.len() / channels.max(1);
+        // A call longer than a voice's line is rendered in pieces.
+        if frames > SCRATCH_FRAMES {
+            for chunk in output.chunks_mut(SCRATCH_FRAMES * channels.max(1)) {
+                self.process_audio(chunk, channels);
+            }
+            return;
+        }
         self.process_commands();
 
         let poly = self.pool();
@@ -219,24 +235,51 @@ impl ArchetEngine {
         for v in self.voices[..poly].iter_mut() {
             v.set_wheels(self.bend, self.wheel);
         }
-        for frame_idx in 0..frames {
-            // Per-voice constant-power panning: in ensemble mode each unison
-            // player is seated at its own azimuth, set at note-on. Other
-            // voices sit at pan 0, both channels equal.
+        // Each voice renders the whole block into its own line, one voice
+        // after another so a voice's state stays in cache for the block;
+        // the sum below reads the lines frame by frame in voice order.
+        let frames_now = frames.min(SCRATCH_FRAMES);
+        {
+            let patch = &self.patch;
+            let lines = &mut self.lines[..poly];
+            let voices = &mut self.voices[..poly];
+            for (v, line) in voices.iter_mut().zip(lines.iter_mut()) {
+                if v.is_active() {
+                    for s in line[..frames_now].iter_mut() {
+                        *s = v.process(patch);
+                    }
+                } else {
+                    line[..frames_now].fill(0.0);
+                }
+            }
+        }
+        // Per-voice constant-power panning: in ensemble mode each unison
+        // player is seated at its own azimuth, set at note-on. Other voices
+        // sit at pan 0, both channels equal.
+        self.pans.clear();
+        self.pans.extend(self.voices[..poly].iter().map(|v| {
+            let pan = v.pan();
+            if pan.abs() < 1e-4 {
+                (1.0, 1.0)
+            } else {
+                let ang = (pan.clamp(-1.0, 1.0) + 1.0) * 0.5 * std::f32::consts::FRAC_PI_2;
+                (ang.cos() * std::f32::consts::SQRT_2, ang.sin() * std::f32::consts::SQRT_2)
+            }
+        }));
+        for frame_idx in 0..frames_now {
             let mut mono = 0.0f32; // for the (global) sympathetic tail
             let mut sl = 0.0f32;
             let mut sr_ = 0.0f32;
             for i in 0..poly {
-                let s = self.voices[i].process(&self.patch);
+                let s = self.lines[i][frame_idx];
                 mono += s;
-                let pan = self.voices[i].pan();
-                if pan.abs() < 1e-4 {
+                let (gl, gr) = self.pans[i];
+                if gl == 1.0 && gr == 1.0 {
                     sl += s;
                     sr_ += s;
                 } else {
-                    let ang = (pan.clamp(-1.0, 1.0) + 1.0) * 0.5 * std::f32::consts::FRAC_PI_2;
-                    sl += s * ang.cos() * std::f32::consts::SQRT_2;
-                    sr_ += s * ang.sin() * std::f32::consts::SQRT_2;
+                    sl += s * gl;
+                    sr_ += s * gr;
                 }
             }
             mono *= norm;
