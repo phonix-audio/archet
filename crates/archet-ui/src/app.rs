@@ -295,7 +295,7 @@ impl ArchetApp {
                         KeyEvent::On { note, velocity } => ArchetCommand::NoteOn(note, velocity),
                         KeyEvent::Off { note } => ArchetCommand::NoteOff(note),
                         KeyEvent::PitchBend(v) => ArchetCommand::PitchBend(v),
-                        KeyEvent::ModWheel(_) => continue,
+                        KeyEvent::ModWheel(v) => ArchetCommand::ModWheel(v),
                     };
                     let _ = self.tx.send(cmd);
                 }

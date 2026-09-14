@@ -45,6 +45,8 @@ pub enum ArchetCommand {
     NoteOff(u8),
     AllNotesOff,
     PitchBend(f32),
+    /// The modulation wheel, 0 to 1: as much vibrato again at full.
+    ModWheel(f32),
     SetPolyphony(u8),
     SetOutputLevel(f32),
     LoadPatch(Box<ArchetPatch>),
@@ -75,6 +77,9 @@ pub const LOWEST_HZ: f32 = 41.2;
 
 pub struct ArchetEngine {
     voices: Vec<ArchetVoice>,
+    /// The pitch bend as a frequency factor, and the modulation wheel.
+    bend: f32,
+    wheel: f32,
     /// The keys that are down. What the keyboard shows: a released note
     /// rings on, and a keyboard lit through its release reads as stuck.
     held_keys: Vec<u8>,
@@ -110,6 +115,8 @@ impl ArchetEngine {
     ) -> Self {
         Self {
             voices: (0..MAX_VOICES).map(|i| ArchetVoice::new(sample_rate, i)).collect(),
+            bend: 1.0,
+            wheel: 0.0,
             held_keys: Vec::new(),
             patch: ArchetPatch::default(),
             command_rx,
@@ -209,6 +216,9 @@ impl ArchetEngine {
             held = [true; 4];
         }
         self.symp.set_held(held);
+        for v in self.voices[..poly].iter_mut() {
+            v.set_wheels(self.bend, self.wheel);
+        }
         for frame_idx in 0..frames {
             // Per-voice constant-power panning: in ensemble mode each unison
             // player is seated at its own azimuth, set at note-on. Other
@@ -402,7 +412,12 @@ impl ArchetEngine {
                         v.note_off(&self.patch);
                     }
                 }
-                ArchetCommand::PitchBend(_) => {}
+                ArchetCommand::PitchBend(semitones) => {
+                    self.bend = 2f32.powf(semitones / 12.0);
+                }
+                ArchetCommand::ModWheel(w) => {
+                    self.wheel = w.clamp(0.0, 1.0);
+                }
                 ArchetCommand::SetPolyphony(p) => {
                     self.patch.polyphony = p.clamp(1, MAX_VOICES as u8);
                     self.patch_dirty = true;

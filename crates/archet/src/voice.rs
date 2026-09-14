@@ -233,6 +233,10 @@ pub struct ArchetVoice {
     ctrl_counter: usize,
     // control-rate cached values
     bend: f32,
+    /// The pitch-bend wheel as a frequency factor, and the modulation
+    /// wheel's share of vibrato on top of the patch's.
+    wheel_bend: f32,
+    wheel_vib: f32,
     bow_vel: f32,
     noise_amt: f32,
 }
@@ -324,6 +328,8 @@ impl ArchetVoice {
             pending_onset: 0,
             ctrl_counter: 0,
             bend: 1.0,
+            wheel_bend: 1.0,
+            wheel_vib: 0.0,
             bow_vel: 0.0,
             noise_amt: 0.0,
         }
@@ -336,6 +342,11 @@ impl ArchetVoice {
     /// Stage azimuth for this voice (-1 L .. +1 R); the ensemble seats each
     /// unison player. 0 for ordinary notes.
     pub fn pan(&self) -> f32 { self.unison_pan }
+    /// The wheels: the bend as a frequency factor, the modulation 0 to 1.
+    pub fn set_wheels(&mut self, bend: f32, vib: f32) {
+        self.wheel_bend = bend;
+        self.wheel_vib = vib;
+    }
     /// The frequency sounding now, in Hz.
     pub fn frequency(&self) -> f32 { self.freq_hz }
 
@@ -1141,7 +1152,7 @@ impl ArchetVoice {
             let ph = self.vib_phase * std::f32::consts::TAU;
             // sine + a touch of 2nd harmonic -> the asymmetric violinist vibrato shape
             let lfo = ph.sin() + 0.13 * (ph * 2.0).sin();
-            let depth = patch.vib_depth * self.vib_depth_jit * self.vib_amt * self.vib_cycle_depth;
+            let depth = patch.vib_depth * self.vib_depth_jit * self.vib_amt * self.vib_cycle_depth * (1.0 + self.wheel_vib);
             // 1/f pitch jitter (natural micro-detuning) on top of the vibrato.
             let jitter = self.pink_pitch.next() * 3.5 * alive; // +/-~3.5 cents, pink (register-scaled)
             // Slow intonation drift, a one-pole walk over seconds: a soloist
@@ -1169,7 +1180,7 @@ impl ArchetVoice {
             if !self.releasing && (gliding || self.modal_recalc.is_multiple_of(8)) {
                 let (b1, b2, stiff, _) = Self::modal_params(self.inst_idx, self.freq_hz);
             let (b1, b2, beta) = (b1 * self.string_damping, b2 * self.string_damping, self.bow_beta);
-                self.modal.set_voice(self.freq_hz * self.bend, b1, b2, stiff, beta);
+                self.modal.set_voice(self.freq_hz * self.bend * self.wheel_bend, b1, b2, stiff, beta);
             }
             // The level's life comes from the hand through the physics; no
             // shimmer is laid over it.

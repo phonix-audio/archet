@@ -638,6 +638,9 @@ impl Plugin for ArchetPlugin {
                     let semitones = (value - 0.5) * 4.0;   // +/-2 semitones
                     let _ = tx.send(ArchetCommand::PitchBend(semitones));
                 }
+                NoteEvent::MidiCC { cc: 1, value, .. } => {
+                    let _ = tx.send(ArchetCommand::ModWheel(value));
+                }
                 _ => {}
             }
         }
