@@ -5,9 +5,11 @@
 //!
 //! Three effects in a fixed order: an equaliser, a space, a width. Which
 //! ones and in which order is not a preset's business; what each is set to
-//! is. The equaliser ships flat, every band off: the bodies are calibrated
-//! on recordings and want no correction, so the bands are the player's. The
-//! space is what the model lacks: a string radiates into a room, and the
+//! is. The equaliser carries what a mix asks of a string that the body,
+//! calibrated on recordings, does not: nothing for a soloist, a softened
+//! bridge hill and a shelf of air for a section, presence on the bridge,
+//! the thump taken off a plucked desk; the rest of its bands are the
+//! player's. The space is what the model lacks: a string radiates into a room, and the
 //! model has no walls. The width is where the listener sits: a soloist
 //! close and narrow, a section across the stage, the low strings mono
 //! below the bass where a wide image only blurs. The figures are a
@@ -38,7 +40,20 @@ pub struct Space {
     /// 0..2. The stereo width the listener hears, one being the seats as
     /// the engine lays them.
     pub width: f32,
+    /// The equaliser's bands in use: the band (its own frequency span,
+    /// low to high), frequency in Hz, gain in dB, Q, and the type by id.
+    pub tone: &'static [(usize, f32, f32, f32, &'static str)],
 }
+
+/// Nothing: the body is the tone.
+pub const AS_IS: &[(usize, f32, f32, f32, &str)] = &[];
+/// A section in a mix: the bridge hill softened where many bows add up,
+/// and a shelf of air above.
+pub const DESK: &[(usize, f32, f32, f32, &str)] = &[(2, 2800.0, -2.0, 1.0, "peak"), (3, 8000.0, 1.5, 0.7, "high-shelf")];
+/// Presence for a bow near the bridge.
+pub const BRIDGE: &[(usize, f32, f32, f32, &str)] = &[(2, 4000.0, 3.0, 1.0, "peak")];
+/// A plucked desk without its thump.
+pub const PLUCK: &[(usize, f32, f32, f32, &str)] = &[(0, 150.0, -3.0, 0.7, "low-shelf")];
 
 /// Below this the image is mono: a low string's fundamental gains nothing
 /// from width.
@@ -46,28 +61,39 @@ pub const MONO_BELOW_HZ: f32 = 120.0;
 
 /// A soloist a few metres away in a small hall.
 pub const CHAMBER: Space =
-    Space { kind: "hall", size: 0.30, decay: 0.35, damping: 0.50, predelay: 0.012, mix: 0.18, width: 0.8 };
+    Space { kind: "hall", size: 0.30, decay: 0.35, damping: 0.50, predelay: 0.012, mix: 0.18, width: 0.8, tone: AS_IS };
 /// A section on a stage.
 pub const HALL: Space =
-    Space { kind: "hall", size: 0.55, decay: 0.50, damping: 0.50, predelay: 0.020, mix: 0.28, width: 1.2 };
+    Space { kind: "hall", size: 0.55, decay: 0.50, damping: 0.50, predelay: 0.020, mix: 0.28, width: 1.2, tone: DESK };
 /// A full string body in a concert hall.
 pub const CONCERT: Space =
-    Space { kind: "hall", size: 0.70, decay: 0.60, damping: 0.45, predelay: 0.025, mix: 0.32, width: 1.3 };
+    Space { kind: "hall", size: 0.70, decay: 0.60, damping: 0.45, predelay: 0.025, mix: 0.32, width: 1.3, tone: DESK };
+/// A soloist bowing at the bridge: the chamber, with presence.
+pub const PONTICELLO: Space = Space { tone: BRIDGE, ..CHAMBER };
 /// Plucked strings close by, in a room that lets each pluck stay distinct.
 pub const ROOM: Space =
-    Space { kind: "room", size: 0.25, decay: 0.30, damping: 0.60, predelay: 0.008, mix: 0.12, width: 1.0 };
+    Space { kind: "room", size: 0.25, decay: 0.30, damping: 0.60, predelay: 0.008, mix: 0.12, width: 1.0, tone: PLUCK };
 
 /// Build the chain. Units are the effects' own: the EQ in Hz and dB, the
 /// reverb normalised except a pre-delay in seconds, the width as a factor
 /// and its mono corner in Hz.
 pub fn chain(space: Space) -> ChainSpec {
     ChainSpec::new(vec![
-        // Flat: the bands are there for the player, none is engaged.
-        SlotSpec::new("parametric-eq")
-            .with("band.0.enabled", false)
-            .with("band.1.enabled", false)
-            .with("band.2.enabled", false)
-            .with("band.3.enabled", false),
+        {
+            let mut eq = SlotSpec::new("parametric-eq");
+            for b in 0..4 {
+                eq = match space.tone.iter().find(|t| t.0 == b) {
+                    Some((_, f, g, q, kind)) => eq
+                        .with(format!("band.{b}.enabled"), true)
+                        .with(format!("band.{b}.freq"), *f)
+                        .with(format!("band.{b}.gain"), *g)
+                        .with(format!("band.{b}.q"), *q)
+                        .with(format!("band.{b}.type"), *kind),
+                    None => eq.with(format!("band.{b}.enabled"), false),
+                };
+            }
+            eq
+        },
         SlotSpec::new("reverb")
             .with("type", space.kind)
             .with("size", space.size)
@@ -84,7 +110,7 @@ pub fn chain(space: Space) -> ChainSpec {
 
 /// The space that fits what a patch plays: plucked strings in a room, a
 /// whole string body in a concert hall, a section in a hall, a soloist in
-/// a chamber.
+/// a chamber, with presence when the bow sits at the bridge.
 pub fn space_for(p: &ArchetPatch) -> Space {
     if p.pluck {
         ROOM
@@ -92,6 +118,8 @@ pub fn space_for(p: &ArchetPatch) -> Space {
         CONCERT
     } else if p.ensemble >= 1.5 {
         HALL
+    } else if p.bow_pos <= 0.05 {
+        PONTICELLO
     } else {
         CHAMBER
     }
