@@ -180,6 +180,11 @@ impl ArchetApp {
     // -- The window ----------------------------------------------------
 
     pub fn draw_ui(&mut self, ui: &mut Ui) {
+        // Every glyph at every size on the first frame, so a page switch
+        // sends the renderer no texture.
+        let mut fonts = phonix_ui::fonts::proportional(&[7.5, 8.0, 8.5, 9.0, 10.0, 12.0]);
+        fonts.extend(phonix_ui::fonts::monospace(&[9.0, 12.0]));
+        phonix_ui::fonts::warm(ui.ctx(), &fonts);
         let ctx = ui.ctx().clone();
         egui_extras::install_image_loaders(&ctx);
         theme::apply_visuals(&ctx);

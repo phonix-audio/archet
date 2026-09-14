@@ -6,6 +6,7 @@
 
 pub use egui;
 
+pub mod fonts;
 pub mod chrome;
 pub mod colors;
 pub mod icons;
