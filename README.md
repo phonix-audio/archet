@@ -23,7 +23,9 @@ ponticello, how hard and how fast, with the friction model and the noise
 and damping of the stroke. The body: which of the four, its response with
 the bridge hill drawn, and the torsion under it. The player: attack and
 release, the vibrato, the dynamics, the size of the section, the level.
-The keyboard below plays it.
+The keyboard below plays it, and underlines the notes the instrument
+plays: outside them the model is asked for a note the real instrument
+has no string for.
 
 ![The editor, bowing](docs/screenshots/archet_arco.png)
 

@@ -94,6 +94,17 @@ impl Instrument {
             Instrument::DoubleBass => 0.33,
         }
     }
+    /// The notes the instrument plays, lowest open string to the top of
+    /// its usual register: violin G3 to E7, viola C3 to A6, cello C2 to
+    /// C6, double bass E1 to G4.
+    pub fn range(self) -> (u8, u8) {
+        match self {
+            Instrument::Violin => (55, 100),
+            Instrument::Viola => (48, 93),
+            Instrument::Cello => (36, 84),
+            Instrument::DoubleBass => (28, 67),
+        }
+    }
     /// Index into the per-instrument body curves in body.rs.
     pub fn body_index(self) -> usize {
         match self {
@@ -370,6 +381,18 @@ impl ArchetPatch {
                          ensemble: 12.0, polyphony: 32, auto_range: true,
                          ..Self::default() }, "Pizzicato Section"),
         ]
+    }
+}
+
+impl ArchetPatch {
+    /// The notes the patch plays: its instrument's, or the whole family's
+    /// where the body is picked per note.
+    pub fn range(&self) -> (u8, u8) {
+        if self.auto_range {
+            (Instrument::DoubleBass.range().0, Instrument::Violin.range().1)
+        } else {
+            self.instrument.range()
+        }
     }
 }
 

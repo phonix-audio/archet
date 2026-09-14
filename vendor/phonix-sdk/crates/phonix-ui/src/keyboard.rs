@@ -90,6 +90,9 @@ pub struct KeyboardStyle {
     pub wheels:        bool,
     /// Stable id salt so multiple keyboards on one screen don't collide.
     pub id_salt:       &'static str,
+    /// The notes the instrument plays, lowest and highest: keys outside are
+    /// drawn faded, and the accent underlines the span. None marks nothing.
+    pub range:         Option<(u8, u8)>,
 }
 
 impl Default for KeyboardStyle {
@@ -97,7 +100,7 @@ impl Default for KeyboardStyle {
         Self {
             accent: ACCENT_SEQ, height: 64.0, labels: true,
             velocity: 100, velocity_by_y: true,
-            header: true, wheels: false, id_salt: "kbd",
+            header: true, wheels: false, id_salt: "kbd", range: None,
         }
     }
 }
@@ -316,6 +319,7 @@ fn keyboard_keys(ui: &mut Ui, state: &mut KeyboardState, style: &KeyboardStyle, 
 
     // ── Draw ──
     let painter = ui.painter();
+    let plays = |note: u8| style.range.is_none_or(|(lo, hi)| (lo..=hi).contains(&note));
     for key in keys.iter().filter(|k| !k.is_black) {
         // Lit = held with the mouse OR sounding from MIDI/the engine (state.active).
         let held = state.held.contains(&key.note) || state.active.contains(&key.note);
@@ -323,6 +327,7 @@ fn keyboard_keys(ui: &mut Ui, state: &mut KeyboardState, style: &KeyboardStyle, 
         let is_c = key.note % 12 == 0;
         let fill = if held { style.accent }
             else if is_hovered { Color32::from_rgb(200, 210, 220) }
+            else if !plays(key.note) { Color32::from_rgb(132, 136, 141) }
             else if is_c { Color32::from_rgb(182, 192, 202) }
             else { Color32::from_rgb(212, 217, 222) };
         painter.rect_filled(key.rect, 3u8, fill);
@@ -341,6 +346,7 @@ fn keyboard_keys(ui: &mut Ui, state: &mut KeyboardState, style: &KeyboardStyle, 
         let is_hovered = hovered == Some(key.note);
         let fill = if held { style.accent }
             else if is_hovered { Color32::from_rgb(60, 65, 70) }
+            else if !plays(key.note) { Color32::from_rgb(52, 52, 56) }
             else { Color32::from_rgb(24, 24, 29) };
         painter.rect_filled(key.rect, 2u8, fill);
         painter.rect_stroke(key.rect, 2u8,
@@ -349,6 +355,18 @@ fn keyboard_keys(ui: &mut Ui, state: &mut KeyboardState, style: &KeyboardStyle, 
         if !held {
             let hl = Rect::from_min_size(key.rect.left_top(), Vec2::new(key.rect.width(), 2.0));
             painter.rect_filled(hl, 2u8, Color32::from_rgb(48, 50, 56));
+        }
+    }
+    // The span the instrument plays, underlined in the accent along the
+    // bottom edge of its white keys.
+    if let Some((lo, hi)) = style.range {
+        let span: Vec<&KeyInfo> = keys.iter().filter(|k| !k.is_black && (lo..=hi).contains(&k.note)).collect();
+        if let (Some(first), Some(last)) = (span.first(), span.last()) {
+            let bar = Rect::from_min_max(
+                Pos2::new(first.rect.left(), first.rect.bottom() - 3.0),
+                Pos2::new(last.rect.right(), first.rect.bottom()),
+            );
+            painter.rect_filled(bar, 1u8, style.accent.gamma_multiply(0.85));
         }
     }
 

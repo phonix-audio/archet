@@ -288,6 +288,7 @@ impl ArchetApp {
                     header: true,
                     wheels: true,
                     id_salt: "archet_kbd",
+                    range: Some(self.patch.range()),
                 };
                 for ev in keyboard_ui(ui, &mut self.keys, &style) {
                     let cmd = match ev {
