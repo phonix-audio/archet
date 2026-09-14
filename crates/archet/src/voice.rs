@@ -79,6 +79,18 @@ pub const PLUCK_SPOT: f32 = 0.185;
 const DRIFT_HZ: f32 = 0.4;
 const DRIFT_CENTS: f32 = 2.0;
 
+/// The hand on the bow. Within a stroke the bow's speed wanders (Askenfelt
+/// 1989 measures the bowing parameters varying through a sustained note)
+/// and the arm carries its physiological tremor, a narrow band near ten
+/// hertz. The wander is 1/f; its share of the speed and the tremor's share
+/// of speed and force are set so the harmonics of a held note without
+/// vibrato flutter as on the anechoic recording: 0.3 to 0.6 dB per
+/// harmonic over 50 ms, a level that moves by 0.8 dB over 20 ms.
+const HAND_SPEED: f32 = 0.08;
+const HAND_TREMOR: f32 = 0.14;
+const TREMOR_HZ: f32 = 10.0;
+const TREMOR_BAND_HZ: f32 = 3.0;
+
 /// 1/f (pink) noise: octave-spaced one-pole-filtered white sources summed
 /// (Voss-McCartney-style). Natural/musical fluctuations are 1/f, not white or
 /// smooth -- this is what the ear reads as a *living* instrument rather than a
@@ -146,6 +158,8 @@ pub struct ArchetVoice {
     pink_amp: Pink,    // amplitude shimmer
     pink_bow: Pink,    // bow-pressure -> time-varying brightness (spectral flux)
     shimmer: f32,      // current 1/f amplitude-shimmer gain
+    /// The arm's tremor: a resonator on white noise, two samples of state.
+    tremor: [f32; 2],
     // The string a plucked note occupies, as (instrument, string), so the next
     // note on that string can end it; and whether it has been ended that way.
     on_string: Option<(usize, usize)>,
@@ -260,6 +274,7 @@ impl ArchetVoice {
             pink_amp: Pink::new(0xC3D4 ^ (voice_idx as u32).wrapping_mul(3266489917)),
             pink_bow: Pink::new(0xE5F6 ^ (voice_idx as u32).wrapping_mul(668265263)),
             shimmer: 1.0,
+            tremor: [0.0; 2],
             note: None,
             on_seq: 0,
             inst_idx: 0,
@@ -1027,6 +1042,17 @@ impl ArchetVoice {
             // 1/f modulation of the bow pressure: a slowly evolving brightness.
             let pbow = self.pink_bow.next();
             let bow_flux = 1.0 + pbow * 0.14 * alive; // +/-14% slow bow-pressure drift (register-scaled)
+            // The hand: the arm's tremor as a resonator on white noise, and
+            // the speed's 1/f wander.
+            let tremor = {
+                let r = (-std::f32::consts::PI * TREMOR_BAND_HZ * dt).exp();
+                let w = 2.0 * std::f32::consts::PI * TREMOR_HZ * dt;
+                let y = 2.0 * r * w.cos() * self.tremor[0] - r * r * self.tremor[1] + self.hum.next() * (1.0 - r);
+                self.tremor = [y, self.tremor[0]];
+                y
+            };
+            let hand_force = 1.0 + HAND_TREMOR * tremor * alive;
+            let hand_speed = 1.0 + (HAND_SPEED * self.pink_amp.next() + HAND_TREMOR * tremor) * alive;
 
             // The bow's force and speed are established within about a string
             // period of the first slip, so the Helmholtz corner is formed from
@@ -1061,14 +1087,14 @@ impl ArchetVoice {
             let target = if self.releasing {
                 self.bow_force_target * self.stroke.powf(1.5)
             } else {
-                self.bow_force_target * bow_flux * self.force_dip
+                self.bow_force_target * bow_flux * hand_force * self.force_dip
             };
             let coeff = (dt / (1.0 / self.freq_hz).clamp(0.004, 0.020)).min(1.0);
             self.bow_force += (target - self.bow_force) * coeff;
 
             // Bow speed follows the gesture (loudness follows |v_bow|). On a
             // detache reversal it decelerates through zero over about 18 ms.
-            let vel_target = self.bow_vel_target * self.stroke;
+            let vel_target = self.bow_vel_target * self.stroke * hand_speed;
             let vel_ramp_t = if self.bow_vel * self.bow_vel_target < 0.0 { 0.018 }
                 else { (1.0 / self.freq_hz).clamp(0.004, 0.020) };
             let vcoeff = (dt / vel_ramp_t).min(1.0);
@@ -1137,8 +1163,9 @@ impl ArchetVoice {
             let (b1, b2, beta) = (b1 * self.string_damping, b2 * self.string_damping, self.bow_beta);
                 self.modal.set_voice(self.freq_hz * self.bend, b1, b2, stiff, beta);
             }
-            // 1/f amplitude shimmer (register-scaled: steady in the bass).
-            self.shimmer = 1.0 + self.pink_amp.next() * 0.09 * alive;
+            // The level's life comes from the hand through the physics; no
+            // shimmer is laid over it.
+            self.shimmer = 1.0;
 
             // The rosin scratch tracks bow speed and force, and bursts at the
             // onset, the bow catching the string before Helmholtz motion
