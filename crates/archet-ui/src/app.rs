@@ -337,7 +337,12 @@ impl ArchetApp {
             ("DAMPING", ArchetParam::Loss, self.patch.loss, 0.0, 1.0, "%"),
         ];
         for (i, (label, param, v, lo, hi, unit)) in row.into_iter().enumerate() {
-            if let Some(nv) = self.knob(ui, geom::bow_knob(band, 1, i), geom::KNOB, label, v, lo, hi, unit, BOW) {
+            // A plucked string has no bow: its force, speed and noise are
+            // drawn unlit. The position is the finger's, the damping the
+            // string's, and both still act.
+            let bow_only = matches!(param, ArchetParam::BowForce | ArchetParam::BowVel | ArchetParam::BowNoise);
+            let tint = if bow_only && self.patch.pluck { dim(BOW) } else { BOW };
+            if let Some(nv) = self.knob(ui, geom::bow_knob(band, 1, i), geom::KNOB, label, v, lo, hi, unit, tint) {
                 self.set(param, nv);
             }
         }
@@ -389,7 +394,9 @@ impl ArchetApp {
             ("VIB DELAY", ArchetParam::VibDelay, self.patch.vib_delay, 0.0, 2.0, "s"),
         ];
         for (i, (label, param, v, lo, hi, unit)) in top.into_iter().enumerate() {
-            if let Some(nv) = self.knob(ui, geom::player_knob(band, 0, i), geom::KNOB, label, v, lo, hi, unit, TRUNK) {
+            // The attack is the bow's acceleration: unlit on a pluck.
+            let tint = if param == ArchetParam::Attack && self.patch.pluck { dim(TRUNK) } else { TRUNK };
+            if let Some(nv) = self.knob(ui, geom::player_knob(band, 0, i), geom::KNOB, label, v, lo, hi, unit, tint) {
                 self.set(param, nv);
             }
         }

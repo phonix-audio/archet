@@ -1941,19 +1941,23 @@ mod profile {
             (P::TuneCents, "tune_cents", -50.0, 50.0), (P::Instrument, "instrument", 0.0, 3.0),
             (P::AutoRange, "auto_range", 0.0, 1.0), (P::Pluck, "pluck", 0.0, 1.0),
         ];
+        // Auto range picks the body from the note: it is heard on a note
+        // outside the violin's register.
+        let note_for = |param: P| if param == P::AutoRange { 40u8 } else { 69u8 };
         let render = |preset: &crate::patch::ArchetPatch, param: P, value: f32| -> (f32, f32, u64) {
+            let note = note_for(param);
             let (mut eng, tx, _mr) = ArchetEngine::new_for_plugin(sr);
             let mut p = preset.clone();
             param.apply(&mut p, value);
             tx.send(ArchetCommand::LoadPatch(Box::new(p))).unwrap();
             let mut buf = vec![0.0f32; block * 2];
             eng.process_audio(&mut buf, 2);
-            tx.send(ArchetCommand::NoteOn(69, 100)).unwrap();
+            tx.send(ArchetCommand::NoteOn(note, 100)).unwrap();
             let mut out: Vec<f32> = Vec::new();
             let hold = (0.7 * sr) as usize / block;
             for i in 0..((1.0 * sr) as usize / block) {
                 if i == hold {
-                    tx.send(ArchetCommand::NoteOff(69)).unwrap();
+                    tx.send(ArchetCommand::NoteOff(note)).unwrap();
                 }
                 buf.fill(0.0);
                 eng.process_audio(&mut buf, 2);
@@ -1974,6 +1978,11 @@ mod profile {
             let preset = find(name);
             println!("== {name}: parameter, level at min / max (dBFS), zero-crossing pitch at min / max (Hz)");
             for (param, label, lo, hi) in params.iter() {
+                // The bow's own controls have nothing to act on under a pluck.
+                if preset.pluck && matches!(param, P::BowVel | P::BowForce | P::BowNoise | P::Attack) {
+                    println!("  {label:<15} (the bow's; a pluck has none)");
+                    continue;
+                }
                 let a = render(&preset, *param, *lo);
                 let b = render(&preset, *param, *hi);
                 let inert = a.2 == b.2;
