@@ -11,15 +11,24 @@ a measurement, and what has been tried.
 
 ## Bowed
 
+- The violin body is calibrated on the bowed open strings at mf (Iowa,
+  the four strings, 2026-09-14): the third-octave envelope of the
+  sustained note sits within 3.1 dB rms of the recordings' over 141-5702
+  Hz, the plucked envelope within 7.1 dB after the pluck's rounding was
+  refitted. The G string's fundamental still radiates 7 dB more than
+  recorded, and 2.5-3.2 kHz sits 6 dB high.
 - A held note does not brighten with force as a real one does. Measured
-  2026-09-13 on a stopped B flat: spectral centroid 573 / 584 / 590 Hz at
-  pp / mf / ff against 618 / 762 / 1095 Hz recorded (Iowa). The
+  2026-09-14 on a stopped B flat: spectral centroid 801 / 865 / 818 Hz at
+  pp / mf / ff against 623 / 781 / 1110 Hz recorded (Iowa): right at mf,
+  too bright at pp, too dark at ff. The
   hyperbolic one-point friction of the modal string (Demoucron) does not
   sharpen the Helmholtz corner with force. Tried and reverted, each
   measured: bow force times 3.8 (+15 % centroid), the friction curve's
   velocity scale, bowing nearer the bridge for louder notes (Askenfelt;
   darker in this model, and a two-second onset because Schelleng's minimum
-  force rises as one over beta squared), and the measured plucked losses
+  force rises as one over beta squared), the measured plucked losses, the
+  string's high-partial loss scaled by the force (2026-09-14, +70 Hz at
+  ff), a low-pass on the bow's force whose corner rises with it (nothing),
   as the bowed losses (darker still). The path is a friction model that
   sharpens the corner (Smith and Woodhouse 2000; Woodhouse 2003), not a
   force-dependent filter.

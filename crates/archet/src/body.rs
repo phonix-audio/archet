@@ -166,18 +166,18 @@ impl Bank {
 /// the region up to the bank), as (Hz, Q, dB). Frequencies and
 /// identifications after Gough 2016 and Woodhouse 2014; widths in the
 /// range Bissinger measures; levels calibrated on the anechoic recordings
-/// of the open strings. The output is the parallel sum of the resonators,
-/// the modal admittance.
+/// of the bowed open strings at mf. The output is the parallel sum of the
+/// resonators, the modal admittance.
 const SIG_VIOLIN: &[(f32, f32, f32)] = &[
-    (275.0, 10.0, 6.0),   // A0  main air (monopole)
-    (405.0, 14.0, 4.0),   // CBR
-    (460.0, 16.0, 2.0),   // B1-
+    (275.0, 10.0, 10.0),  // A0  main air (monopole)
+    (405.0, 14.0, -3.0),  // CBR
+    (460.0, 16.0, 4.0),   // B1-
     (485.0, 25.0, -8.0),  // A1
     (550.0, 18.0, 4.0),   // B1+
-    (640.0, 20.0, -6.0),  // transitional
-    (820.0, 12.0, -3.0),  // 650-1300 nasality dip
-    (1010.0, 12.0, -3.0), // dip
-    (1220.0, 15.0, 4.0),  // rising out of the dip
+    (640.0, 20.0, -8.0),  // transitional
+    (820.0, 12.0, 1.0),   // 650-1300 nasality dip
+    (1010.0, 12.0, -6.0), // dip
+    (1220.0, 15.0, 0.0),  // rising out of the dip
 ];
 
 /// The statistical bank above the signature modes: the modes' Q (the
@@ -211,23 +211,32 @@ struct BodySpec {
     roll2_f: f32,
     roll2_db_oct: f32,
     hp_f: f32,
+    /// Poles of the radiation high-pass: two, or four where the body
+    /// radiates nothing under its air resonance.
+    hp_poles: u8,
     lp_f: f32,
 }
 
+/// The violin: signature modes as measured, the bank's level, hill and
+/// roll-offs and the radiation limits fitted to the third-octave envelope
+/// of the bowed open strings at mf (Iowa), a four-pole radiation high-pass
+/// under the air resonance where the recordings show the G string's
+/// fundamental twenty decibels down.
 const VIOLIN: BodySpec = BodySpec {
     sig: SIG_VIOLIN,
     bank_from: 1320.0,
     bank_to: 11000.0,
     level_spacing: 170.0,
-    bank_db: -9.0,
-    hill_f: 2800.0,
+    bank_db: -6.0,
+    hill_f: 2700.0,
     hill_gain: 0.5,
-    roll_f: 3600.0,
-    roll_db_oct: -10.0,
+    roll_f: 4000.0,
+    roll_db_oct: -4.0,
     roll2_f: 4200.0,
-    roll2_db_oct: -16.0,
-    hp_f: 320.0,
-    lp_f: 4200.0,
+    roll2_db_oct: -10.0,
+    hp_f: 360.0,
+    hp_poles: 4,
+    lp_f: 5100.0,
 };
 
 // Viola: A0 measured at 208-244 Hz across five violas (Coffey 2013) and 224 Hz
@@ -260,6 +269,7 @@ const VIOLA: BodySpec = BodySpec {
     roll2_f: 2400.0,
     roll2_db_oct: -16.0,
     hp_f: 300.0,
+    hp_poles: 2,
     lp_f: 3700.0,
 };
 
@@ -296,6 +306,7 @@ const CELLO: BodySpec = BodySpec {
     roll2_f: 2600.0,
     roll2_db_oct: -14.0,
     hp_f: 40.0,
+    hp_poles: 2,
     lp_f: 2500.0,
 };
 
@@ -330,6 +341,7 @@ const BASS: BodySpec = BodySpec {
     roll2_f: 1200.0,
     roll2_db_oct: -12.0,
     hp_f: 40.0,
+    hp_poles: 2,
     lp_f: 1500.0,
 };
 
@@ -358,7 +370,7 @@ pub fn envelope_db(inst: usize, bridge_hill_db: f32, hz: f32) -> f32 {
     let roll2 = if fc > s.roll2_f { s.roll2_db_oct * (fc / s.roll2_f).log2() } else { 0.0 };
     // The radiation high-pass below the lowest mode, and the output roll-off
     // above the brilliance band: both one-pole-ish, drawn as such.
-    let hp_db = -10.0 * (1.0 + (s.hp_f / fc).powi(4)).log10();
+    let hp_db = -10.0 * (1.0 + (s.hp_f / fc).powi(2 * s.hp_poles as i32)).log10();
     let lp_db = -10.0 * (1.0 + (fc / s.lp_f).powi(4)).log10();
     s.bank_db + hump + roll + roll2 + hp_db + lp_db
 }
@@ -366,6 +378,8 @@ pub fn envelope_db(inst: usize, bridge_hill_db: f32, hz: f32) -> f32 {
 #[derive(Debug, Clone)]
 pub struct ModalBody {
     hp: Biquad,
+    /// The second stage of the radiation high-pass, where it has four poles.
+    hp2: Option<Biquad>,
     res: Bank, // parallel resonators (bandpass) and their gains
     lp: Biquad, // output roll-off above the brilliance band: the F band
     // (4200-6879) rides the mode skirts, which a per-mode gain does not reach.
@@ -378,6 +392,7 @@ impl ModalBody {
     pub fn new(fs: f32, inst: usize, detune: f32, bridge_hill_db: f32) -> Self {
         let mut body = Self {
             hp: Biquad::highpass(fs, 100.0, 0.7),
+            hp2: None,
             res: Bank::new(),
             lp: Biquad::lowpass(fs, 4000.0, 0.7),
             norm: 1.0,
@@ -438,13 +453,16 @@ impl ModalBody {
         }
         // radiation high-pass below the lowest mode (the body cannot radiate
         // there), and the output roll-off above the brilliance band
-        let hp = Biquad::highpass(fs, (s.hp_f * detune).clamp(30.0, 300.0), 0.7);
+        let hp_f = (s.hp_f * detune).clamp(30.0, 600.0);
+        let hp = Biquad::highpass(fs, hp_f, 0.7);
+        let hp2 = (s.hp_poles >= 4).then(|| Biquad::highpass(fs, hp_f, 0.7));
         let lp_f = (s.lp_f * detune).clamp(600.0, 9000.0);
         let lp = Biquad::lowpass(fs, lp_f, 0.7);
         // normalize so the summed bank sits at a sane level
         let gsum: f32 = res.gain_sum().max(1e-3);
         debug_assert!(res.len() <= MAX_MODES, "the body bank outgrew its reserve");
         self.hp = hp;
+        self.hp2 = hp2;
         self.lp = lp;
         self.norm = 30.0 / gsum.sqrt();
     }
@@ -457,12 +475,14 @@ impl ModalBody {
     #[inline]
     pub fn process(&mut self, x: f32) -> f32 {
         let xin = self.hp.process(x);
+        let xin = match self.hp2.as_mut() { Some(h) => h.process(xin), None => xin };
         let y = self.res.process(xin);
         self.lp.process(y * self.norm)
     }
 
     pub fn reset(&mut self) {
         self.hp.reset();
+        if let Some(h) = self.hp2.as_mut() { h.reset(); }
         self.lp.reset();
         self.res.reset();
     }
@@ -603,6 +623,6 @@ mod shared_filter_migration {
         let sig = probe();
         let mut body = ModalBody::new(48_000.0, 0, 1.0, 6.0); // violin body
         let o: Vec<f32> = sig.iter().map(|&x| body.process(x)).collect();
-        assert_eq!(crate::fingerprint::of(&o), 6543449001806458770, "archet ModalBody drifted");
+        assert_eq!(crate::fingerprint::of(&o), 13235866128811505630, "archet ModalBody drifted");
     }
 }

@@ -51,6 +51,9 @@ Bodies
 Recordings the model was calibrated on (none is redistributed here)
 - University of Iowa Electronic Music Studios, Musical Instrument
   Samples, Lawrence Fritts: anechoic violin, viola, cello and double bass,
-  plucked and bowed, freely usable.
+  plucked and bowed, freely usable. The violin body rests on the bowed
+  open strings at mf (Violin.arco.mf.sulG.G3B3, sulD.D4A4, sulA.A4B4,
+  sulE.E5B5, first note of each), the pluck's rounding on the plucked
+  ones, the brightness with dynamics is judged on the pp and ff sets.
 - Philharmonia Orchestra sound samples: violin long notes with vibrato,
   free to use.

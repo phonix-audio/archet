@@ -635,7 +635,7 @@ mod preset_sweep_tests {
             left.extend(buf.iter().step_by(2));
         }
         let h = crate::fingerprint::of(&left);
-        const GOLDEN: u64 = 0x16cde39dca00faf5; // the ensemble render, note-offs included
+        const GOLDEN: u64 = 0x9e0939478f10f422; // the ensemble render, note-offs included
         assert_eq!(h, GOLDEN, "Archet ensemble render drifted from golden (hash {h:#018x})");
     }
 }
@@ -1200,6 +1200,37 @@ mod profile {
         for (i, p) in mk.iter().enumerate() {
             println!("  {:<12} {:>9.1} {:>12.3}", p.name, 10.0 * mean[i].max(1e-18).log10(),
                      (mean[0] / mean[i]).sqrt() * crate::voice::ArchetVoice::inst_level(p.instrument.body_index()));
+        }
+    }
+
+    /// The violin's four open strings bowed at three dynamics, three and a
+    /// half seconds each, to files the arco comparison reads against the
+    /// anechoic recordings: /tmp/archet_bow_family_<velocity>_<string>.wav.
+    ///   cargo test --release --lib engine::profile::bow_family -- --ignored --nocapture
+    #[test]
+    #[ignore = "diagnostic - run with --ignored"]
+    fn bow_family() {
+        let sr = 48_000.0f32;
+        let block = 256usize;
+        for vel in [32u8, 80, 112] {
+            for (s, note) in [55u8, 62, 69, 76].iter().enumerate() {
+                let (mut eng, tx, _mr) = ArchetEngine::new_for_plugin(sr);
+                let mut p = ArchetPatch::violin();
+                p.vib_depth = 0.0;
+                tx.send(ArchetCommand::LoadPatch(Box::new(p))).unwrap();
+                let mut buf = vec![0.0f32; block * 2];
+                eng.process_audio(&mut buf, 2);
+                tx.send(ArchetCommand::NoteOn(*note, vel)).unwrap();
+                let mut out: Vec<f32> = Vec::new();
+                for _ in 0..((3.5 * sr) as usize / block) {
+                    buf.fill(0.0);
+                    eng.process_audio(&mut buf, 2);
+                    out.extend(buf.chunks(2).map(|q| 0.5 * (q[0] + q[1])));
+                }
+                let path = format!("/tmp/archet_bow_family_{vel}_{s}.wav");
+                write_wav(&path, &out, sr);
+                println!("  velocity {vel} string {s}: peak {:.4}, wrote {path}", out.iter().fold(0.0f32, |m, x| m.max(x.abs())));
+            }
         }
     }
 
@@ -2814,7 +2845,7 @@ mod golden_audio {
         }
         let h = crate::fingerprint::of(&left);
         eprintln!("GOLDEN = {h:#018x}");
-        assert_eq!(h, 0x3b2f368174d3c463, "the engine's rendered audio changed");
+        assert_eq!(h, 0xb9726e5806e4d529, "the engine's rendered audio changed");
     }
 }
 
