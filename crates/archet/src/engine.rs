@@ -69,93 +69,12 @@ pub struct ArchetMeterState {
 /// lights, players add nothing the pool can render.
 pub const PLAYERS_MAX: f32 = 32.0;
 
-/// The engine's safety: a fader ride on the summed output. The gain is
-/// one until the sum passes full scale, then whatever brings the peak back
-/// to it, reached over a short slope that a lookahead of the same length
-/// hides, so a bridge force's vertical edge is held too; that peak is
-/// held for two periods of the lowest string sounding, so the gain never
-/// moves inside a cycle, and it comes back at a walking pace once the
-/// peak has passed. The factory bank never reaches it; the level control
-/// can. Inter-sample overshoot is left to the chain behind the engine.
-struct Fader {
-    /// The gain applied now.
-    gain: f32,
-    /// Per-sample share of the way to a lower target the gain moves.
-    slope: f32,
-    /// The samples in flight, oldest at `at`.
-    line: [[f32; 2]; Fader::LOOKAHEAD],
-    at: usize,
-    /// The highest peak seen since the hold began.
-    held: f32,
-    /// Samples the held peak is kept before it starts to fall.
-    hold_left: usize,
-    /// How many samples a new peak is held; set per block from the lowest
-    /// string sounding.
-    hold: usize,
-    /// Per-sample factor the held peak falls by once its hold has run out.
-    fall: f32,
-}
-
-impl Fader {
-    /// The pace the gain comes back at, in dB per second.
-    const RETURN_DB_PER_S: f32 = 6.0;
-    /// Periods of the lowest string the peak is held for.
-    const HOLD_PERIODS: f32 = 2.0;
-    /// Samples the output runs behind the gain: the gain's move down is
-    /// four time constants long, and lands before the peak leaves the line.
-    pub const LOOKAHEAD: usize = 32;
-
-    fn new(sample_rate: f32) -> Self {
-        Self {
-            gain: 1.0,
-            slope: 1.0 - (-4.0 / Self::LOOKAHEAD as f32).exp(),
-            line: [[0.0; 2]; Self::LOOKAHEAD],
-            at: 0,
-            held: 0.0,
-            hold_left: 0,
-            hold: 0,
-            fall: 10f32.powf(-Self::RETURN_DB_PER_S / 20.0 / sample_rate),
-        }
-    }
-
-    /// Set the hold from the lowest frequency sounding.
-    fn hold_for(&mut self, lowest_hz: f32, sample_rate: f32) {
-        self.hold = (Self::HOLD_PERIODS * sample_rate / lowest_hz.max(1.0)).ceil() as usize;
-    }
-
-    /// A stereo pair in, the pair from `LOOKAHEAD` samples ago out, at the
-    /// gain the pair in has moved to.
-    fn run(&mut self, l: f32, r: f32) -> (f32, f32) {
-        let g = self.gain(l.abs().max(r.abs()));
-        let out = self.line[self.at];
-        self.line[self.at] = [l, r];
-        self.at = (self.at + 1) % Self::LOOKAHEAD;
-        (out[0] * g, out[1] * g)
-    }
-
-    /// The gain after a stereo pair with this peak has entered the line.
-    fn gain(&mut self, peak: f32) -> f32 {
-        if peak >= self.held {
-            self.held = peak;
-            self.hold_left = self.hold;
-        } else if self.hold_left > 0 {
-            self.hold_left -= 1;
-        } else {
-            self.held *= self.fall;
-        }
-        let target = if self.held > 1.0 { 1.0 / self.held } else { 1.0 };
-        if target < self.gain {
-            self.gain += (target - self.gain) * self.slope;
-        } else {
-            self.gain = target;
-        }
-        self.gain
-    }
-}
+/// The lowest note the instrument plays, in Hz: the double bass's E
+/// string. What holds a peak holds it for two of its periods.
+pub const LOWEST_HZ: f32 = 41.2;
 
 pub struct ArchetEngine {
     voices: Vec<ArchetVoice>,
-    fader: Fader,
     /// The keys that are down. What the keyboard shows: a released note
     /// rings on, and a keyboard lit through its release reads as stuck.
     held_keys: Vec<u8>,
@@ -191,7 +110,6 @@ impl ArchetEngine {
     ) -> Self {
         Self {
             voices: (0..MAX_VOICES).map(|i| ArchetVoice::new(sample_rate, i)).collect(),
-            fader: Fader::new(sample_rate),
             held_keys: Vec::new(),
             patch: ArchetPatch::default(),
             command_rx,
@@ -219,7 +137,6 @@ impl ArchetEngine {
         if (sample_rate - self.sample_rate).abs() < 1e-3 { return; }
         self.sample_rate = sample_rate;
         self.voices = (0..MAX_VOICES).map(|i| ArchetVoice::new(sample_rate, i)).collect();
-        self.fader = Fader::new(sample_rate);
         self.symp = SympStrings::new(sample_rate, self.symp_inst);
         self.held_keys.clear();
         self.patch_dirty = true;
@@ -292,14 +209,6 @@ impl ArchetEngine {
             held = [true; 4];
         }
         self.symp.set_held(held);
-        let lowest = self.voices[..poly]
-            .iter()
-            .filter(|v| v.is_active())
-            .map(|v| v.frequency())
-            .fold(f32::INFINITY, f32::min);
-        if lowest.is_finite() {
-            self.fader.hold_for(lowest, self.sample_rate);
-        }
         for frame_idx in 0..frames {
             // Per-voice constant-power panning: in ensemble mode each unison
             // player is seated at its own azimuth, set at note-on. Other
@@ -328,7 +237,10 @@ impl ArchetEngine {
             // is one tail and does not branch on the stroke. The tail is a
             // global resonance: driven by the mono sum, added centered.
             let tail = self.symp.process(mono) * self.symp_level;
-            let (l, r) = self.fader.run(sl + tail, sr_ + tail);
+            // Unclamped: the engine's scale keeps the bank under full scale,
+            // and the plugin's fader after the chain holds the rest.
+            let l = sl + tail;
+            let r = sr_ + tail;
 
             self.peak_l = self.peak_l.max(l.abs());
             self.peak_r = self.peak_r.max(r.abs());
@@ -620,14 +532,6 @@ impl ArchetEngine {
         }
     }
 
-    /// The fader's gain now, for measurement.
-    pub fn fader_gain(&self) -> f32 {
-        self.fader.gain
-    }
-
-    /// Samples the output runs behind the notes: the fader's lookahead.
-    pub const LATENCY: usize = Fader::LOOKAHEAD;
-
     /// The voices in use: the polyphony counts notes, and each note lights
     /// its players, up to the pool.
     fn pool(&self) -> usize {
@@ -731,7 +635,7 @@ mod preset_sweep_tests {
             left.extend(buf.iter().step_by(2));
         }
         let h = crate::fingerprint::of(&left);
-        const GOLDEN: u64 = 0xe71b9722c3d36962; // the ensemble render, note-offs included
+        const GOLDEN: u64 = 0x16cde39dca00faf5; // the ensemble render, note-offs included
         assert_eq!(h, GOLDEN, "Archet ensemble render drifted from golden (hash {h:#018x})");
     }
 }
@@ -2910,55 +2814,22 @@ mod golden_audio {
         }
         let h = crate::fingerprint::of(&left);
         eprintln!("GOLDEN = {h:#018x}");
-        assert_eq!(h, 0x30ee3f2e8689e16c, "the engine's rendered audio changed");
+        assert_eq!(h, 0x3b2f368174d3c463, "the engine's rendered audio changed");
     }
 }
 
 #[cfg(test)]
-mod fader {
+mod scale {
     use super::*;
-
-    fn render(patch: ArchetPatch, chord: &[u8], secs: f32) -> Vec<f32> {
-        let sr = 48_000.0f32;
-        let block = 512usize;
-        let (mut eng, tx, _mr) = ArchetEngine::new_for_plugin(sr);
-        tx.send(ArchetCommand::LoadPatch(Box::new(patch))).unwrap();
-        for &n in chord {
-            tx.send(ArchetCommand::NoteOn(n, 127)).unwrap();
-        }
-        let mut out = Vec::new();
-        let mut buf = vec![0.0f32; block * 2];
-        for _ in 0..((secs * sr) as usize / block) {
-            buf.fill(0.0);
-            eng.process_audio(&mut buf, 2);
-            out.extend_from_slice(&buf);
-        }
-        out
-    }
 
     fn peak(x: &[f32]) -> f32 {
         x.iter().fold(0.0f32, |m, v| m.max(v.abs()))
     }
 
-    /// The largest section holding a chord at full velocity with the
-    /// level control at its top stays at full scale, within the slope's
-    /// residual, and the fader is what holds it.
-    #[test]
-    fn a_section_chord_is_held_at_full_scale() {
-        let mut p = ArchetPatch::violin();
-        p.ensemble = PLAYERS_MAX;
-        p.polyphony = 32;
-        p.output_level = 4.0;
-        let out = render(p, &[55, 62, 67, 74], 1.5);
-        let settled = &out[(1.0 * 48_000.0 * 2.0) as usize..];
-        assert!(peak(settled) <= 1.02, "past full scale: {}", peak(settled));
-        assert!(peak(settled) > 0.8, "held far under full scale: {}", peak(settled));
-    }
-
     /// The loudest the bank holds, the largest section holding the
     /// fullest chord its pool lights at full velocity, peaks just under
-    /// full scale on the engine's own scale, the fader idle: that is what
-    /// the bow level is set to.
+    /// full scale on the engine's own scale: that is what the bow level
+    /// is set to.
     #[test]
     fn the_scale_is_the_largest_section() {
         let sr = 48_000.0f32;
@@ -2980,7 +2851,6 @@ mod fader {
         for i in 0..((1.6 * sr) as usize / block) {
             buf.fill(0.0);
             eng.process_audio(&mut buf, 2);
-            assert_eq!(eng.fader_gain(), 1.0, "the fader worked on the engine's own scale");
             if i * block > (0.4 * sr) as usize {
                 top = top.max(peak(&buf));
             }
@@ -2989,36 +2859,4 @@ mod fader {
         assert!((-3.0..=0.0).contains(&db), "the largest section's chord peaks at {db:.1} dBFS");
     }
 
-    /// A soloist's note stays under full scale on its own headroom, so
-    /// the fader leaves it alone: its gain is one throughout.
-    #[test]
-    fn a_soloist_is_not_touched() {
-        let mut f = Fader::new(48_000.0);
-        f.hold_for(196.0, 48_000.0);
-        let out = render(ArchetPatch::violin(), &[69], 1.0);
-        assert!(peak(&out) < 1.0);
-        for pair in out.chunks(2) {
-            assert_eq!(f.gain(pair[0].abs().max(pair[1].abs())), 1.0);
-        }
-    }
-
-    /// The held peak is kept for the hold and then falls at the return
-    /// pace: after one second the gain has come back six decibels.
-    #[test]
-    fn the_gain_comes_back_at_a_walking_pace() {
-        let sr = 48_000.0f32;
-        let mut f = Fader::new(sr);
-        f.hold_for(41.2, sr);
-        let hold = f.hold;
-        let mut g = f.gain(4.0);
-        for _ in 0..hold {
-            g = f.gain(0.0);
-        }
-        assert!((g - 0.25).abs() < 1e-2, "the slope did not reach the target within the hold: {g}");
-        for _ in 0..(sr as usize) {
-            f.gain(0.0);
-        }
-        let g = f.gain(0.0);
-        assert!((20.0 * (g / 0.25).log10() - Fader::RETURN_DB_PER_S).abs() < 0.05, "gain {g}");
-    }
 }

@@ -27,7 +27,7 @@ archet-ui = { path = "crates/archet-ui", version = "0.1.0" }
 # in with `phonix-dsp = { workspace = true }`; the ones this plugin does not
 # use simply stay unreferenced.
 phonix-dsp    = { path = "vendor/phonix-sdk/crates/phonix-dsp" }
-phonix-fx     = { path = "vendor/phonix-sdk/crates/phonix-fx", features = ["parametric-eq", "reverb", "brickwall-limiter"] }
+phonix-fx     = { path = "vendor/phonix-sdk/crates/phonix-fx", features = ["parametric-eq", "reverb", "stereo-imager"] }
 phonix-music  = { path = "vendor/phonix-sdk/crates/phonix-music" }
 phonix-plugin = { path = "vendor/phonix-sdk/crates/phonix-plugin" }
 phonix-rt     = { path = "vendor/phonix-sdk/crates/phonix-rt" }

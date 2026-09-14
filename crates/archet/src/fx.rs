@@ -3,13 +3,15 @@
 //! Described here, run nowhere: the engine owns no effects. The host builds
 //! a live chain from this description.
 //!
-//! Three effects in a fixed order: an equaliser, a space, a ceiling. Which
+//! Three effects in a fixed order: an equaliser, a space, a width. Which
 //! ones and in which order is not a preset's business; what each is set to
 //! is. The equaliser ships flat, every band off: the bodies are calibrated
 //! on recordings and want no correction, so the bands are the player's. The
 //! space is what the model lacks: a string radiates into a room, and the
-//! model has no walls. The ceiling is safety, the same for every preset.
-//! The spaces' figures are a production choice, made by ear, and say so.
+//! model has no walls. The width is where the listener sits: a soloist
+//! close and narrow, a section across the stage, the low strings mono
+//! below the bass where a wide image only blurs. The figures are a
+//! production choice, made by ear, and say so.
 
 use phonix_fx::{ChainSpec, SlotSpec};
 
@@ -33,27 +35,31 @@ pub struct Space {
     pub predelay: f32,
     /// 0..1. How much of it is heard: the slot's mix.
     pub mix: f32,
+    /// 0..2. The stereo width the listener hears, one being the seats as
+    /// the engine lays them.
+    pub width: f32,
 }
+
+/// Below this the image is mono: a low string's fundamental gains nothing
+/// from width.
+pub const MONO_BELOW_HZ: f32 = 120.0;
 
 /// A soloist a few metres away in a small hall.
 pub const CHAMBER: Space =
-    Space { kind: "hall", size: 0.30, decay: 0.35, damping: 0.50, predelay: 0.012, mix: 0.18 };
+    Space { kind: "hall", size: 0.30, decay: 0.35, damping: 0.50, predelay: 0.012, mix: 0.18, width: 0.8 };
 /// A section on a stage.
 pub const HALL: Space =
-    Space { kind: "hall", size: 0.55, decay: 0.50, damping: 0.50, predelay: 0.020, mix: 0.28 };
+    Space { kind: "hall", size: 0.55, decay: 0.50, damping: 0.50, predelay: 0.020, mix: 0.28, width: 1.2 };
 /// A full string body in a concert hall.
 pub const CONCERT: Space =
-    Space { kind: "hall", size: 0.70, decay: 0.60, damping: 0.45, predelay: 0.025, mix: 0.32 };
+    Space { kind: "hall", size: 0.70, decay: 0.60, damping: 0.45, predelay: 0.025, mix: 0.32, width: 1.3 };
 /// Plucked strings close by, in a room that lets each pluck stay distinct.
 pub const ROOM: Space =
-    Space { kind: "room", size: 0.25, decay: 0.30, damping: 0.60, predelay: 0.008, mix: 0.12 };
-
-/// Where every preset's ceiling sits, in dBFS.
-pub const CEILING_DB: f32 = -0.3;
+    Space { kind: "room", size: 0.25, decay: 0.30, damping: 0.60, predelay: 0.008, mix: 0.12, width: 1.0 };
 
 /// Build the chain. Units are the effects' own: the EQ in Hz and dB, the
-/// reverb normalised except a pre-delay in seconds, the limiter's ceiling
-/// in dB and its release in milliseconds.
+/// reverb normalised except a pre-delay in seconds, the width as a factor
+/// and its mono corner in Hz.
 pub fn chain(space: Space) -> ChainSpec {
     ChainSpec::new(vec![
         // Flat: the bands are there for the player, none is engaged.
@@ -70,11 +76,9 @@ pub fn chain(space: Space) -> ChainSpec {
             .with("predelay", space.predelay)
             .with("width", 1.0_f32)
             .mix(space.mix),
-        // Safety, not character: how loud is too loud is not a musical
-        // choice.
-        SlotSpec::new("brickwall-limiter")
-            .with("ceiling", CEILING_DB)
-            .with("release", 50.0_f32),
+        SlotSpec::new("stereo-imager")
+            .with("width", space.width)
+            .with("mono-freq", MONO_BELOW_HZ),
     ])
 }
 
@@ -110,7 +114,7 @@ mod tests {
     #[test]
     fn the_order_and_the_kinds_are_frozen() {
         let spec = chain(CHAMBER);
-        assert_eq!(spec.kinds().collect::<Vec<_>>(), ["parametric-eq", "reverb", "brickwall-limiter"]);
+        assert_eq!(spec.kinds().collect::<Vec<_>>(), ["parametric-eq", "reverb", "stereo-imager"]);
         assert_eq!(spec.len(), FX_SLOTS);
         assert!(spec.slots.iter().all(|s| s.enabled));
     }

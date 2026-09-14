@@ -19,4 +19,5 @@ egui           = { workspace = true }
 serde_json     = { workspace = true }
 phonix-plugin  = { workspace = true }   # the `.vstpreset` writer + the `Preset` trait
 phonix-fx     = { workspace = true }
+phonix-dsp    = { workspace = true }   # the fader after the chain
 phonix-rt      = { workspace = true }   # the lock-free meter channel

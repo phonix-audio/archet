@@ -52,7 +52,7 @@ limit; a saved value above what the pool can hold means the pool.
 
 ## The chain a patch carries
 
-    slots   equaliser, space, ceiling
+    slots   equaliser, space, width
 
 Every factory preset carries its own settings for those three, inside its
 patch, as the field `fx`: the spaces differ with what plays (a soloist in
@@ -68,7 +68,7 @@ what its window says; `Init` (preset zero) runs no chain at all.
 
 The chain is a `phonix_fx::ChainSpec`: every slot names its kind and its
 parameters by string id (`"parametric-eq"`, `"reverb"`, `"type": "hall"`,
-`"brickwall-limiter"`, `"ceiling"`), and the slot's mix is the slot's.
+`"stereo-imager"`, `"width"`), and the slot's mix is the slot's.
 Those ids are the wire format. The ranges and units of every parameter
 live with the effect in `phonix_fx::effects`.
 

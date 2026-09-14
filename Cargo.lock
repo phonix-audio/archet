@@ -143,6 +143,7 @@ dependencies = [
  "libc",
  "nice-plug",
  "nice-plug-egui",
+ "phonix-dsp",
  "phonix-fx",
  "phonix-plugin",
  "phonix-rt",

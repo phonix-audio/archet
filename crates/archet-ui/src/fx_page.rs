@@ -4,7 +4,7 @@
 //! curated means, and the recipe lives with the patch in `archet::fx`.
 //! Everything inside each effect is. Drawn on the same plates as the
 //! instrument page, and each effect shows what it does: the equaliser its
-//! response, the ceiling its transfer, from the same numbers the audio
+//! response, from the same numbers the audio
 //! thread runs.
 
 use egui::{Align2, FontId, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Ui, Vec2};
@@ -201,32 +201,6 @@ fn eq_plot(ui: &Ui, r: Rect, a: &SlotAccess) {
     ui.painter().add(Shape::line(line, Stroke::new(1.5_f32, ROSIN)));
 }
 
-/// A transfer curve, input dB across and output dB up. `out` maps an input
-/// level to the level that leaves.
-fn transfer_plot(ui: &Ui, r: Rect, out: impl Fn(f32) -> f32) {
-    plot_frame(ui, r);
-    let span = 60.0f32;
-    let x_of = |d: f32| r.left() + (d + span) / span * r.width();
-    let y_of = |d: f32| r.bottom() - (d + span) / span * r.height();
-    // Unity, faint: what the signal would do if the slot did nothing.
-    ui.painter().line_segment([Pos2::new(x_of(-span), y_of(-span)), Pos2::new(x_of(0.0), y_of(0.0))],
-                              Stroke::new(1.0_f32, WELL_EDGE));
-    for d in [-40.0, -20.0] {
-        ui.painter().line_segment([Pos2::new(x_of(d), r.top()), Pos2::new(x_of(d), r.bottom())],
-                                  Stroke::new(1.0_f32, WELL_EDGE.gamma_multiply(0.5)));
-        ui.painter().text(Pos2::new(x_of(d) + 3.0, r.bottom() - 2.0), Align2::LEFT_BOTTOM, format!("{d:.0}"),
-                          FontId::proportional(8.0), PLATE_SILK_DIM);
-    }
-    let n = r.width() as usize;
-    let line: Vec<Pos2> = (0..=n)
-        .map(|i| {
-            let din = -span + span * i as f32 / n as f32;
-            Pos2::new(x_of(din), y_of(out(din).clamp(-span, 0.0)))
-        })
-        .collect();
-    ui.painter().add(Shape::line(line, Stroke::new(1.5_f32, ROSIN)));
-}
-
 /// What each band is under its automatic type, which the recipe never changes.
 const BAND_NAMES: [&str; 4] = ["LOW\nSHELF", "PEAK 1", "PEAK 2", "HIGH\nSHELF"];
 
@@ -327,16 +301,13 @@ pub fn draw(ui: &mut Ui, r: Rect, spec: &mut ChainSpec, state: &mut FxPageState)
                 y += 2.0 * PITCH_Y;
                 caption(ui, Pos2::new(x0, y), "the space the string radiates into:\nthe model has no walls of its own");
             }
-            "brickwall-limiter" => {
-                let ceiling = a.get("ceiling");
-                transfer_plot(ui, plot, |din| din.min(ceiling));
-                y += PLOT_H + 10.0;
+            "stereo-imager" => {
                 let at = |c: usize| Pos2::new(x0 + c as f32 * PITCH_X, y);
-                knob(ui, at(0), "CEILING", &mut a, "ceiling");
-                knob(ui, at(1), "RELEASE", &mut a, "release");
+                knob(ui, at(0), "WIDTH", &mut a, "width");
+                knob(ui, at(1), "MONO", &mut a, "mono-freq");
                 changed |= mix_knob(ui, at(2), a.slot);
                 y += PITCH_Y;
-                caption(ui, Pos2::new(x0, y), "nothing leaves above the ceiling,\nwhatever the two slots before it add");
+                caption(ui, Pos2::new(x0, y), "where the listener sits: a soloist close\nand narrow, a section across the stage");
             }
             _ => {
                 // A kind without a panel of its own: every float it declares, in rows of four.
@@ -383,7 +354,7 @@ mod tests {
 
     #[test]
     fn a_knob_over_a_declared_parameter_formats_with_its_unit() {
-        let spec = Registry::builtin().get("brickwall-limiter").unwrap().spec;
-        assert_eq!(spec.param("ceiling").unwrap().unit.format(-0.3), "-0.3 dB");
+        let spec = Registry::builtin().get("reverb").unwrap().spec;
+        assert_eq!(spec.param("predelay").unwrap().unit.format(0.02), "20 ms");
     }
 }

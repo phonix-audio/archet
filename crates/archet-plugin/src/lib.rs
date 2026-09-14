@@ -17,6 +17,7 @@ use std::sync::{mpsc, Arc, RwLock};
 mod fx;
 use fx::FxLink;
 use phonix_fx::{Chain, ChainSpec, Musical, Transport};
+use phonix_dsp::fader::Fader;
 
 use archet::engine::{ArchetCommand, ArchetEngine, ArchetMeterState};
 use archet::patch::{ArchetPatch, Instrument};
@@ -40,6 +41,9 @@ pub struct ArchetPlugin {
     last_preset:     i32,
     /// The chain the patch describes, built by the host after the engine.
     fx_chain:        Option<Chain>,
+    /// The family's fader, after the chain: nothing leaves past full
+    /// scale. `None` until `initialize` knows the sample rate.
+    fader:           Option<Fader>,
     /// The chain as the editor and the audio thread hand it to each other.
     fx_link:         Arc<FxLink>,
     fx_seen:         u64,
@@ -101,6 +105,7 @@ impl Default for ArchetPlugin {
             factory_presets: presets,
             last_preset:     0,
             fx_chain:        None,
+            fader:           None,
             fx_link:         Arc::new(FxLink::new(ChainSpec::default())),
             fx_seen:         0,
             last_init_sig:   None,
@@ -536,6 +541,7 @@ impl Plugin for ArchetPlugin {
             Some(c) => c.prepare(sr, max_block),
             None => self.fx_chain = Some(Chain::new(sr, max_block)),
         }
+        self.fader = Some(Fader::new(sr, archet::engine::LOWEST_HZ));
 
         let patch = self.params.patch_state.read().map(|p| p.clone()).unwrap_or_default();
         // A restored project brings its chain with it, inside the patch; one
@@ -543,7 +549,7 @@ impl Plugin for ArchetPlugin {
         // spec leaves an empty chain.
         if let Some(c) = self.fx_chain.as_mut() {
             fx::apply(c, &patch.fx);
-            context.set_latency_samples((c.latency_samples() + ArchetEngine::LATENCY) as u32);
+            context.set_latency_samples((c.latency_samples() + Fader::LATENCY) as u32);
         }
         self.fx_link.seed(patch.fx.clone());
         self.fx_seen = self.fx_link.rev();
@@ -579,7 +585,7 @@ impl Plugin for ArchetPlugin {
                     // the editor: this branch also fires on host automation.
                     if let Some(c) = self.fx_chain.as_mut() {
                         fx::apply(c, &patch.fx);
-                        context.set_latency_samples((c.latency_samples() + ArchetEngine::LATENCY) as u32);
+                        context.set_latency_samples((c.latency_samples() + Fader::LATENCY) as u32);
                     }
                     self.fx_seen = self.fx_link.publish(patch.fx.clone());
                 }
@@ -588,7 +594,7 @@ impl Plugin for ArchetPlugin {
                 // came with.
                 if let Some(c) = self.fx_chain.as_mut() {
                     fx::disengage(c);
-                    context.set_latency_samples((c.latency_samples() + ArchetEngine::LATENCY) as u32);
+                    context.set_latency_samples((c.latency_samples() + Fader::LATENCY) as u32);
                 }
                 self.fx_seen = self.fx_link.publish(ChainSpec::default());
             }
@@ -598,7 +604,7 @@ impl Plugin for ArchetPlugin {
             let mut latency = None;
             self.fx_link.apply_if_new(&mut self.fx_seen, |spec| {
                 fx::apply(c, spec);
-                latency = Some((c.latency_samples() + ArchetEngine::LATENCY) as u32);
+                latency = Some((c.latency_samples() + Fader::LATENCY) as u32);
             });
             if let Some(l) = latency {
                 context.set_latency_samples(l);
@@ -656,6 +662,9 @@ impl Plugin for ArchetPlugin {
         }
         if let Some(c) = self.fx_chain.as_mut() {
             c.process(&mut self.buf_l[..num_samples], &mut self.buf_r[..num_samples], &[], Transport::default(), Musical::default());
+        }
+        if let Some(f) = self.fader.as_mut() {
+            f.process(&mut self.buf_l[..num_samples], &mut self.buf_r[..num_samples]);
         }
 
         let channel_slices = buffer.as_slice();
@@ -765,7 +774,7 @@ mod fx_chain_compat {
     }
 }
 
-/// The factory bank against its ceilings.
+/// The factory bank against the fader.
 #[cfg(test)]
 mod bank {
     use super::*;
@@ -777,11 +786,11 @@ mod bank {
         20.0 * x.max(1e-9).log10()
     }
 
-    /// The most a preset's reference chord may lean on its ceiling, in dB
-    /// of gain reduction. Past it the ceiling is heard working.
+    /// The most the fader may take from a preset's reference chord, in
+    /// dB. Past it the fader is heard working.
     const LEAN_DB: f32 = 2.0;
 
-    /// The chord a preset is trimmed on: a double stop for a soloist, a
+    /// The chord a preset is measured on: a double stop for a soloist, a
     /// spread chord for a section, the whole range for a composite desk.
     fn reference(p: &ArchetPatch) -> &'static [u8] {
         let section = p.ensemble >= 1.5;
@@ -801,28 +810,24 @@ mod bank {
         }
     }
 
-    /// What one preset does under its reference chord at full velocity:
-    /// the bare engine's peak, the peak the ceiling is asked to hold, and
-    /// the output rms, all in dB. The ceiling's input is read through a
-    /// second chain fed the same audio well under the ceiling, since the
-    /// two effects before it are linear.
+    /// What one preset does under its reference chord at full velocity,
+    /// through the chain and the fader: the bare engine's peak, the
+    /// output's peak, the output rms and the deepest the fader went, all
+    /// in dB.
     fn measure(preset: &ArchetPatch) -> (f32, f32, f32, f32) {
         let sr = 48_000.0f32;
         let block = 512usize;
-        const QUIET: f32 = 1e-3;
         let (mut eng, tx, _mr) = ArchetEngine::new_for_plugin(sr);
         tx.send(ArchetCommand::LoadPatch(Box::new(preset.clone()))).unwrap();
         let mut chain = Chain::new(sr, block);
         fx::apply(&mut chain, &preset.fx);
-        let mut probe = Chain::new(sr, block);
-        fx::apply(&mut probe, &preset.fx);
+        let mut fader = Fader::new(sr, archet::engine::LOWEST_HZ);
         for &n in reference(preset) {
             tx.send(ArchetCommand::NoteOn(n, 127)).unwrap();
         }
         let mut buf = vec![0.0f32; block * 2];
         let (mut l, mut r) = (vec![0.0f32; block], vec![0.0f32; block]);
-        let (mut ql, mut qr) = (vec![0.0f32; block], vec![0.0f32; block]);
-        let (mut raw_peak, mut in_peak, mut out_sq, mut n, mut fader) = (0.0f32, 0.0f32, 0.0f64, 0usize, 1.0f32);
+        let (mut raw_peak, mut out_peak, mut out_sq, mut n, mut deepest) = (0.0f32, 0.0f32, 0.0f64, 0usize, 1.0f32);
         let settle = (0.4 * sr) as usize;
         for i in 0..((1.6 * sr) as usize / block) {
             buf.fill(0.0);
@@ -830,36 +835,32 @@ mod bank {
             for k in 0..block {
                 l[k] = buf[k * 2];
                 r[k] = buf[k * 2 + 1];
-                ql[k] = l[k] * QUIET;
-                qr[k] = r[k] * QUIET;
             }
             chain.process(&mut l, &mut r, &[], Transport::default(), Musical::default());
-            probe.process(&mut ql, &mut qr, &[], Transport::default(), Musical::default());
-            fader = fader.min(eng.fader_gain());
+            fader.process(&mut l, &mut r);
+            deepest = deepest.min(fader.gain());
             if i * block > settle {
                 raw_peak = raw_peak.max(buf.iter().fold(0.0f32, |m, x| m.max(x.abs())));
-                in_peak = in_peak.max(ql.iter().chain(qr.iter()).fold(0.0f32, |m, x| m.max(x.abs())) / QUIET);
+                out_peak = out_peak.max(l.iter().chain(r.iter()).fold(0.0f32, |m, x| m.max(x.abs())));
                 out_sq += l.iter().chain(r.iter()).map(|x| (*x as f64).powi(2)).sum::<f64>();
                 n += buf.len();
             }
         }
-        (db(raw_peak), db(in_peak), db((out_sq / n as f64).sqrt() as f32), db(fader))
+        (db(raw_peak), db(out_peak), db((out_sq / n as f64).sqrt() as f32), db(deepest))
     }
 
-    /// Every preset's reference chord at full velocity stays under full
-    /// scale on the engine's own scale, the fader never working past a
-    /// hearing threshold, and leans on its ceiling by no more than one.
+    /// Every preset's reference chord at full velocity leaves under full
+    /// scale with the fader idle within a hearing threshold.
     #[test]
     #[cfg_attr(debug_assertions, ignore = "runs the whole bank; release only")]
-    fn every_preset_sits_under_its_ceiling() {
-        println!("{:<24} {:>8} {:>8} {:>8} {:>8}", "preset", "raw pk", "fader", "at ceil", "out rms");
+    fn every_preset_sits_under_full_scale() {
+        println!("{:<24} {:>8} {:>8} {:>8} {:>8}", "preset", "raw pk", "out pk", "out rms", "fader");
         let mut failed = Vec::new();
         for preset in ArchetPatch::factory_presets() {
-            let (pk, at, out, fader) = measure(&preset);
-            let lean = at - archet::fx::CEILING_DB;
-            println!("{:<24} {:>8.1} {:>8.1} {:>8.1} {:>8.1}", preset.name, pk, fader, at, out);
-            if lean > LEAN_DB || fader < -LEAN_DB {
-                failed.push(format!("{} reaches its ceiling at {lean:+.1} dB, its fader at {fader:+.1}", preset.name));
+            let (pk, out, rms, fader) = measure(&preset);
+            println!("{:<24} {:>8.1} {:>8.1} {:>8.1} {:>8.1}", preset.name, pk, out, rms, fader);
+            if fader < -LEAN_DB || out > 0.1 {
+                failed.push(format!("{}: out {out:+.1} dBFS, fader {fader:+.1} dB", preset.name));
             }
         }
         assert!(failed.is_empty(), "{}", failed.join("\n"));

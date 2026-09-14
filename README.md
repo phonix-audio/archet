@@ -33,8 +33,9 @@ string instead of where the bow crosses it.
 ![The editor, plucked](docs/screenshots/archet_pizzicato.png)
 
 Behind a switch, the effects the patch carries: an equaliser that ships
-flat, the space the string radiates into, and a ceiling. Which three and
-in what order is fixed; everything inside them is the player's.
+flat, the space the string radiates into, and the width the listener
+hears it at. Which three and in what order is fixed; everything inside
+them is the player's.
 
 ![The editor, effects](docs/screenshots/archet_effects.png)
 
@@ -50,9 +51,9 @@ at a soloist's level and brings its players as density. On that scale
 the loudest thing in the factory bank, the largest section holding a
 chord at full velocity, peaks just under full scale, and no preset
 carries a level of its own; the level control goes to four times.
-Behind the sum a fader ride, with a short lookahead, holds anything the
-level control pushes past full scale and comes back at a walking pace;
-the factory bank never reaches it. Nothing in the engine clips.
+Behind the chain, the plugin's fader holds anything the level control
+pushes past full scale and comes back at a walking pace; the factory
+bank never reaches it. Nothing in the engine clips.
 
 ## Effects
 
@@ -64,10 +65,16 @@ equaliser, flat by design since the bodies are calibrated on recordings;
 a reverb, because a string radiates into a room and the model has no
 walls of its own, set per preset to a chamber for a soloist, a hall for a
 section, a concert hall for a full string body and a room for plucked
-strings; and a brickwall ceiling, the same for every preset. The chain is
+strings; and a stereo width, a soloist close and narrow, a section
+across the stage, the low strings mono below the bass. The chain is
 part of the patch and travels with a project; a project saved before it
 existed carries an empty chain, which is a real no-op. `COMPAT.md` says
 what of this is frozen.
+
+Behind the chain, and not a slot of it, the plugin runs the family's
+fader: a ride at full scale with a short lookahead that holds whatever
+the level control pushes past it, and idles on every factory preset.
+Nothing a plugin of this family hands its host passes full scale.
 
 ## Layout
 

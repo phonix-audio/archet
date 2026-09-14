@@ -81,9 +81,9 @@ a measurement, and what has been tried.
 - A section is no louder than a soloist on the engine's scale: the
   microphone stands back as the section grows, and the growth of level
   with players a listener in the hall hears is not rendered. The fader
-  behind the sum works only past full scale and comes back at 6 dB per
+  behind the chain works only past full scale and comes back at 6 dB per
   second: a soft passage right after a loud one pushed there starts held
-  down. Inter-sample overshoot is the preset ceiling's.
+  down. Its lookahead reads sample peaks, not the ones between them.
 - The largest section, thirty-two voices holding a chord, costs about a
   third of one core at 48 kHz in a release build (2026-09-14), the modal
   string now the larger half of a voice; three such instances do not fit
