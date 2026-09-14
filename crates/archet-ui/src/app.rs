@@ -381,8 +381,8 @@ impl ArchetApp {
 
         let band = Rect::from_min_max(r.min + Vec2::new(12.0, 0.0), r.max - Vec2::new(12.0, 0.0));
         let top: [(&str, ArchetParam, f32, f32, f32, &str); 5] = [
-            ("ATTACK", ArchetParam::Attack, self.patch.attack, 0.0, 0.5, "s"),
-            ("RELEASE", ArchetParam::Release, self.patch.release, 0.0, 1.0, "s"),
+            ("ATTACK", ArchetParam::Attack, self.patch.attack, 0.005, 4.0, "s"),
+            ("RELEASE", ArchetParam::Release, self.patch.release, 0.02, 4.0, "s"),
             ("VIB RATE", ArchetParam::VibRate, self.patch.vib_rate, 0.0, 9.0, "Hz"),
             ("VIB DEPTH", ArchetParam::VibDepth, self.patch.vib_depth, 0.0, 60.0, "c"),
             ("VIB DELAY", ArchetParam::VibDelay, self.patch.vib_delay, 0.0, 2.0, "s"),
@@ -427,8 +427,16 @@ impl ArchetApp {
     #[allow(clippy::too_many_arguments)]
     fn knob(&mut self, ui: &mut Ui, at: Pos2, size: f32, label: &str, value: f32,
             lo: f32, hi: f32, unit: &str, tint: Color32) -> Option<f32> {
+        // A time travels logarithmically: its useful range spans decades,
+        // from an accent's milliseconds to a pad's seconds.
+        let log = unit == "s" && lo > 0.0;
         let span = (hi - lo).max(1e-6);
-        let mut n = ((value - lo) / span).clamp(0.0, 1.0);
+        let mut n = if log {
+            (value.max(lo) / lo).ln() / (hi / lo).ln()
+        } else {
+            (value - lo) / span
+        }
+        .clamp(0.0, 1.0);
         let old = n;
         let text = match unit {
             "%" => format!("{:.0}", n * 100.0),
@@ -444,7 +452,7 @@ impl ArchetApp {
         cui.vertical_centered(|ui| {
             widgets::knob_fmt(ui, &mut n, label, &text, size, tint);
         });
-        ((n - old).abs() > 1e-6).then_some(lo + n * span)
+        ((n - old).abs() > 1e-6).then_some(if log { lo * (hi / lo).powf(n) } else { lo + n * span })
     }
 }
 

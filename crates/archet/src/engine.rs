@@ -635,7 +635,7 @@ mod preset_sweep_tests {
             left.extend(buf.iter().step_by(2));
         }
         let h = crate::fingerprint::of(&left);
-        const GOLDEN: u64 = 0x57e9b19d07bfd223; // the ensemble render, note-offs included
+        const GOLDEN: u64 = 0xb3547bf3946fb84c; // the ensemble render, note-offs included
         assert_eq!(h, GOLDEN, "Archet ensemble render drifted from golden (hash {h:#018x})");
     }
 }
@@ -1245,10 +1245,12 @@ mod profile {
     fn attack_map() {
         let sr = 48_000.0f32;
         let block = 128usize;
-        let win = (0.025 * sr) as usize / block;
-        println!("  {:>4} {:>6} {:>10} {:>10}  slip share per 25 ms", "vel", "attack", "helmholtz", "rise10-90");
+        println!("  {:>4} {:>6} {:>10} {:>10}  slip share per window (25 ms, or 250 ms past a fifth of a second)", "vel", "attack", "helmholtz", "rise10-90");
         for vel in [40u8, 80, 120] {
-            for attack in [0.005f32, 0.02, 0.05, 0.1, 0.2] {
+            for attack in [0.005f32, 0.02, 0.05, 0.1, 0.2, 1.0, 3.0] {
+                let win_s = if attack > 0.2 { 0.25 } else { 0.025 };
+                let win = (win_s * sr) as usize / block;
+                let secs = if attack > 0.2 { 2.0 * attack + 1.0 } else { 1.2 };
                 let (mut eng, tx, _mr) = ArchetEngine::new_for_plugin(sr);
                 let mut p = ArchetPatch::violin();
                 p.vib_depth = 0.0;
@@ -1260,7 +1262,7 @@ mod profile {
                 let mut slips = Vec::new();
                 let mut rms = Vec::new();
                 let mut acc = 0.0f32;
-                for i in 0..((1.2 * sr) as usize / block) {
+                for i in 0..((secs * sr) as usize / block) {
                     buf.fill(0.0);
                     eng.process_audio(&mut buf, 2);
                     acc += buf.iter().step_by(2).map(|x| x * x).sum::<f32>();
@@ -1272,21 +1274,22 @@ mod profile {
                         acc = 0.0;
                     }
                 }
+                let tail = slips.len() * 2 / 3;
                 let steady_slip = {
-                    let mut t: Vec<f32> = slips[20..].to_vec();
+                    let mut t: Vec<f32> = slips[tail..].to_vec();
                     t.sort_by(|a, b| a.partial_cmp(b).unwrap());
                     t[t.len() / 2]
                 };
                 let settled = (0..slips.len() - 4)
                     .find(|&i| slips[i..i + 4].iter().all(|s| (s - steady_slip).abs() < steady_slip / 3.0))
-                    .map(|i| i as f32 * 25.0);
+                    .map(|i| i as f32 * win_s * 1000.0);
                 let steady_rms = {
-                    let mut t: Vec<f32> = rms[20..].to_vec();
+                    let mut t: Vec<f32> = rms[tail..].to_vec();
                     t.sort_by(|a, b| a.partial_cmp(b).unwrap());
                     t[t.len() / 2]
                 };
-                let t10 = rms.iter().position(|r| *r > 0.1 * steady_rms).unwrap_or(0) as f32 * 25.0;
-                let t90 = rms.iter().position(|r| *r > 0.9 * steady_rms).unwrap_or(0) as f32 * 25.0;
+                let t10 = rms.iter().position(|r| *r > 0.1 * steady_rms).unwrap_or(0) as f32 * win_s * 1000.0;
+                let t90 = rms.iter().position(|r| *r > 0.9 * steady_rms).unwrap_or(0) as f32 * win_s * 1000.0;
                 let shares: Vec<String> = slips.iter().take(24).map(|s| format!("{:.0}", s * 100.0)).collect();
                 println!("  {:>4} {:>6.3} {:>7} ms {:>7} ms  {}", vel, attack,
                          settled.map_or("never".to_string(), |t| format!("{t:.0}")), t90 - t10, shares.join(" "));
@@ -2905,7 +2908,7 @@ mod golden_audio {
         }
         let h = crate::fingerprint::of(&left);
         eprintln!("GOLDEN = {h:#018x}");
-        assert_eq!(h, 0x72f3aa5a298a5b0a, "the engine's rendered audio changed");
+        assert_eq!(h, 0xe6c27b4752598514, "the engine's rendered audio changed");
     }
 }
 

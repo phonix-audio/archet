@@ -241,10 +241,10 @@ impl ArchetParams {
                 .with_unit(" dB").with_value_to_string(formatters::v2s_f32_rounded(1)),
 
             attack: FloatParam::new("Attack", 0.04, FloatRange::Skewed {
-                min: 0.005, max: 0.2, factor: FloatRange::skew_factor(-1.5),
+                min: 0.005, max: 4.0, factor: FloatRange::skew_factor(-2.5),
             }).with_unit(" s").with_value_to_string(formatters::v2s_f32_rounded(3)),
             release: FloatParam::new("Release", 0.12, FloatRange::Skewed {
-                min: 0.02, max: 0.4, factor: FloatRange::skew_factor(-1.5),
+                min: 0.02, max: 4.0, factor: FloatRange::skew_factor(-2.5),
             }).with_unit(" s").with_value_to_string(formatters::v2s_f32_rounded(3)),
             vel_sens: FloatParam::new("Velocity Sens", 1.0, FloatRange::Linear { min: 0.0, max: 1.0 })
                 .with_unit(" %").with_value_to_string(formatters::v2s_f32_percentage(0)),

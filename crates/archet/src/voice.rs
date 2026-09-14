@@ -37,6 +37,10 @@ impl Noise {
 /// seven, and the harder the bow the sooner Helmholtz motion establishes
 /// (Guettler), from about half a second at two to within a tenth at the
 /// loudest of this window.
+/// The rise time under which an attack is played force-first, the time
+/// Helmholtz motion takes to establish at a mezzo-forte.
+const ATTACK_QUICK: f32 = 0.1;
+
 const PRESS_SOFT: f32 = 3.0;
 const PRESS_LOUD: f32 = 7.0;
 
@@ -189,8 +193,8 @@ pub struct ArchetVoice {
     // a held sustain and a shaped fall (Demoucron, chapters 5-6). The bow
     // force follows it, so loudness and brightness co-vary through the note.
     stroke: f32,        // current gesture value (multiplies bow_vel/force targets)
-    stroke_rise_t: f32, // per-note rise time (8-60 ms; accents fast, soft notes slow)
-    stroke_fall_t: f32, // per-note fall time on note_off (50-90 ms; longer when low)
+    stroke_rise_t: f32, // per-note rise time, from an accent's few ms to a pad's seconds
+    stroke_fall_t: f32, // per-note fall time on note_off, longer when low
     stroke_floor: f32,  // sustain decay floor (low strings breathe more)
     stroke_tau: f32,    // sustain decay time constant (s)
     releasing: bool,
@@ -657,13 +661,13 @@ impl ArchetVoice {
         // setting, quicker on an accent (Guettler, On the creation of the
         // Helmholtz motion in bowed strings, Acustica 2002: the attack is a
         // ramp of speed under a force that is there first).
-        self.stroke_rise_t = (patch.attack * (1.6 - 0.8 * v) * (1.0 + r5 * 0.25 * js)).clamp(0.005, 0.3);
+        self.stroke_rise_t = (patch.attack * (1.6 - 0.8 * v) * (1.0 + r5 * 0.25 * js)).clamp(0.005, 8.0);
         // The release control sets the gesture's fall as well: what a
         // listener hears as the end of a bowed note is the gesture's fall, the
         // bow decelerating off the string. Amplitude follows the stroke, whose
         // time constant is a third of this, so the control spans a real range.
         // Low strings take longer to let go, and the per-note spread stays.
-        let fall = patch.release.clamp(0.02, 0.9) * if lowi { 1.55 } else { 1.0 };
+        let fall = patch.release.clamp(0.02, 8.0) * if lowi { 1.55 } else { 1.0 };
         self.stroke_fall_t = (fall * (1.0 + r6 * 0.20 * js)).max(0.03);
         self.stroke_floor = (if lowi { 0.65 } else { 0.80 }) * (1.0 + r5 * 0.05);
         self.stroke_tau = (if lowi { 0.8 } else { 1.2 }) * (1.0 + r6 * 0.20);
@@ -1200,7 +1204,17 @@ impl ArchetVoice {
             // The force is the player's, not the speed's: through the attack
             // it stands at its full value while the bow accelerates, and it
             // leaves with the bow when the bow lifts.
-            let speed = if self.releasing { self.bow_vel.abs() } else { self.bow_vel_target.abs() };
+            // Force-first for a quick attack (Guettler): the force stands at
+            // its full value while the bow accelerates. A slow swell keeps
+            // the press instead, the force rising with the bow's own speed
+            // above a floor that shrinks as the rise lengthens past the
+            // time Helmholtz motion takes to establish.
+            let speed = if self.releasing {
+                self.bow_vel.abs()
+            } else {
+                let floor = self.bow_vel_target.abs() * (ATTACK_QUICK / self.stroke_rise_t).min(1.0);
+                self.bow_vel.abs().max(floor)
+            };
             let fb = press * self.modal.impedance() * speed;
             // Bow off: extra modal decay so detache notes settle in about
             // 150 ms; while bowing, the natural ring. The damping applies only
