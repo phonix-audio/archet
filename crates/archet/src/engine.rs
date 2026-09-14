@@ -635,7 +635,7 @@ mod preset_sweep_tests {
             left.extend(buf.iter().step_by(2));
         }
         let h = crate::fingerprint::of(&left);
-        const GOLDEN: u64 = 0x43538ece760c311e; // the ensemble render, note-offs included
+        const GOLDEN: u64 = 0x57e9b19d07bfd223; // the ensemble render, note-offs included
         assert_eq!(h, GOLDEN, "Archet ensemble render drifted from golden (hash {h:#018x})");
     }
 }
@@ -1230,6 +1230,66 @@ mod profile {
                 let path = format!("/tmp/archet_bow_family_{vel}_{s}.wav");
                 write_wav(&path, &out, sr);
                 println!("  velocity {vel} string {s}: peak {:.4}, wrote {path}", out.iter().fold(0.0f32, |m, x| m.max(x.abs())));
+            }
+        }
+    }
+
+    /// How fast Helmholtz motion establishes: a stopped B flat on the
+    /// violin at three bow forces (velocity) and five attack ramps, the
+    /// slipping share per 25 ms over the first 600 ms, the time it first
+    /// settles within a third of its steady value for 100 ms, and the
+    /// level's rise from a tenth to nine tenths of its steady rms.
+    ///   cargo test --release --lib engine::profile::attack_map -- --ignored --nocapture
+    #[test]
+    #[ignore = "diagnostic - run with --ignored"]
+    fn attack_map() {
+        let sr = 48_000.0f32;
+        let block = 128usize;
+        let win = (0.025 * sr) as usize / block;
+        println!("  {:>4} {:>6} {:>10} {:>10}  slip share per 25 ms", "vel", "attack", "helmholtz", "rise10-90");
+        for vel in [40u8, 80, 120] {
+            for attack in [0.005f32, 0.02, 0.05, 0.1, 0.2] {
+                let (mut eng, tx, _mr) = ArchetEngine::new_for_plugin(sr);
+                let mut p = ArchetPatch::violin();
+                p.vib_depth = 0.0;
+                p.attack = attack;
+                tx.send(ArchetCommand::LoadPatch(Box::new(p))).unwrap();
+                let mut buf = vec![0.0f32; block * 2];
+                eng.process_audio(&mut buf, 2);
+                tx.send(ArchetCommand::NoteOn(70, vel)).unwrap();
+                let mut slips = Vec::new();
+                let mut rms = Vec::new();
+                let mut acc = 0.0f32;
+                for i in 0..((1.2 * sr) as usize / block) {
+                    buf.fill(0.0);
+                    eng.process_audio(&mut buf, 2);
+                    acc += buf.iter().step_by(2).map(|x| x * x).sum::<f32>();
+                    if (i + 1) % win == 0 {
+                        if let Some(v) = eng.voices.iter_mut().find(|v| v.is_active()) {
+                            slips.push(v.bow_state().0);
+                        }
+                        rms.push((acc / (win * block) as f32).sqrt());
+                        acc = 0.0;
+                    }
+                }
+                let steady_slip = {
+                    let mut t: Vec<f32> = slips[20..].to_vec();
+                    t.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                    t[t.len() / 2]
+                };
+                let settled = (0..slips.len() - 4)
+                    .find(|&i| slips[i..i + 4].iter().all(|s| (s - steady_slip).abs() < steady_slip / 3.0))
+                    .map(|i| i as f32 * 25.0);
+                let steady_rms = {
+                    let mut t: Vec<f32> = rms[20..].to_vec();
+                    t.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                    t[t.len() / 2]
+                };
+                let t10 = rms.iter().position(|r| *r > 0.1 * steady_rms).unwrap_or(0) as f32 * 25.0;
+                let t90 = rms.iter().position(|r| *r > 0.9 * steady_rms).unwrap_or(0) as f32 * 25.0;
+                let shares: Vec<String> = slips.iter().take(24).map(|s| format!("{:.0}", s * 100.0)).collect();
+                println!("  {:>4} {:>6.3} {:>7} ms {:>7} ms  {}", vel, attack,
+                         settled.map_or("never".to_string(), |t| format!("{t:.0}")), t90 - t10, shares.join(" "));
             }
         }
     }
@@ -2845,7 +2905,7 @@ mod golden_audio {
         }
         let h = crate::fingerprint::of(&left);
         eprintln!("GOLDEN = {h:#018x}");
-        assert_eq!(h, 0xa82a9d2a4320e59c, "the engine's rendered audio changed");
+        assert_eq!(h, 0x72f3aa5a298a5b0a, "the engine's rendered audio changed");
     }
 }
 

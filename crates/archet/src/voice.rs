@@ -33,10 +33,12 @@ impl Noise {
 
 /// The bow force in Schelleng's terms (force over the string's impedance
 /// times the bow speed) at the softest and the loudest dynamic. Measured on
-/// the held-note diagnostic: Helmholtz motion settles within half a second
-/// from about two and stays clean past seven.
-const PRESS_SOFT: f32 = 2.0;
-const PRESS_LOUD: f32 = 4.0;
+/// the held-note and attack-map diagnostics: the tone stays clean past
+/// seven, and the harder the bow the sooner Helmholtz motion establishes
+/// (Guettler), from about half a second at two to within a tenth at the
+/// loudest of this window.
+const PRESS_SOFT: f32 = 3.0;
+const PRESS_LOUD: f32 = 7.0;
 
 
 /// The bowed bridge force's share of the working level: with the force in

@@ -54,6 +54,16 @@ a measurement, and what has been tried.
 
 ## Plucked
 
+- A bowed attack establishes Helmholtz motion late: 25 to 400 ms at a
+  mezzo-forte depending on the attack ramp, 100 to 600 at pianissimo
+  (attack-map diagnostic, 2026-09-14), against the 50 to 100 ms of a
+  clean recorded attack (Guettler and Askenfelt); until then the string
+  slips several times a period and the onset is brighter than the tone
+  that follows, where a recording's is darker. The ramp the ATTACK
+  control sets is the loudness's, and Helmholtz follows it only loosely.
+  A harder bow helps, and the window's floor was raised for it; the rest
+  is the one-point hyperbolic friction, which neither sharpens the corner
+  with force nor absorbs the secondary waves as a bow of some width does.
 - The attack carries no finger contact and no body knock. The recordings'
   attacks are strong at 1.6-2 kHz for 50 ms where their sustained part is
   weak; the model has no source for that, so the cello and bass attacks
