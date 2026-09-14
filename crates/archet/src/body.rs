@@ -175,9 +175,9 @@ const SIG_VIOLIN: &[(f32, f32, f32)] = &[
     (485.0, 25.0, -8.0),  // A1
     (550.0, 18.0, 4.0),   // B1+
     (640.0, 20.0, -8.0),  // transitional
-    (820.0, 12.0, 1.0),   // 650-1300 nasality dip
-    (1010.0, 12.0, -6.0), // dip
-    (1220.0, 15.0, 0.0),  // rising out of the dip
+    (820.0, 12.0, -2.0),  // 650-1300 nasality dip
+    (1010.0, 12.0, -3.0), // dip
+    (1220.0, 15.0, -3.0), // rising out of the dip
 ];
 
 /// The statistical bank above the signature modes: the modes' Q (the
@@ -227,9 +227,9 @@ const VIOLIN: BodySpec = BodySpec {
     bank_from: 1320.0,
     bank_to: 11000.0,
     level_spacing: 170.0,
-    bank_db: -6.0,
+    bank_db: -9.0,
     hill_f: 2700.0,
-    hill_gain: 0.5,
+    hill_gain: 0.35,
     roll_f: 4000.0,
     roll_db_oct: -4.0,
     roll2_f: 4200.0,
@@ -623,6 +623,6 @@ mod shared_filter_migration {
         let sig = probe();
         let mut body = ModalBody::new(48_000.0, 0, 1.0, 6.0); // violin body
         let o: Vec<f32> = sig.iter().map(|&x| body.process(x)).collect();
-        assert_eq!(crate::fingerprint::of(&o), 13235866128811505630, "archet ModalBody drifted");
+        assert_eq!(crate::fingerprint::of(&o), 9637368526334119063, "archet ModalBody drifted");
     }
 }

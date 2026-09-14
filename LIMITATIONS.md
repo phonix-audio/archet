@@ -13,14 +13,17 @@ a measurement, and what has been tried.
 
 - The violin body is calibrated on the bowed open strings at mf (Iowa,
   the four strings, 2026-09-14): the third-octave envelope of the
-  sustained note sits within 3.1 dB rms of the recordings' over 141-5702
-  Hz, the plucked envelope within 7.1 dB after the pluck's rounding was
-  refitted. The G string's fundamental still radiates 7 dB more than
-  recorded, and 2.5-3.2 kHz sits 6 dB high.
+  sustained note sits within 3.8 dB rms of the recordings' over 141-5702
+  Hz, and Duennwald's nasality and brilliance bands (650-1300 and
+  1300-4200 Hz over 190-650) match the G string's recording within a
+  decibel, the sum of G, D and A within two under it. The plucked
+  envelope sits within 6.2 dB after the pluck's rounding was refitted.
+  The G string's fundamental still radiates 7 dB more than recorded, and
+  the D string's 650-1300 Hz band is 7 dB under its recording's.
 - A held note does not brighten with force as a real one does. Measured
-  2026-09-14 on a stopped B flat: spectral centroid 801 / 865 / 818 Hz at
-  pp / mf / ff against 623 / 781 / 1110 Hz recorded (Iowa): right at mf,
-  too bright at pp, too dark at ff. The
+  2026-09-14 on a stopped B flat with vibrato: spectral centroid 617 /
+  648 / 641 Hz at pp / mf / ff against 623 / 781 / 1110 Hz recorded
+  (Iowa): right at pp, dark above it. The
   hyperbolic one-point friction of the modal string (Demoucron) does not
   sharpen the Helmholtz corner with force. Tried and reverted, each
   measured: bow force times 3.8 (+15 % centroid), the friction curve's

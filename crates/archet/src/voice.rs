@@ -83,7 +83,7 @@ const DRIFT_CENTS: f32 = 2.0;
 /// 1989 measures the bowing parameters varying through a sustained note)
 /// and the arm carries its physiological tremor, a narrow band near ten
 /// hertz. The wander is 1/f; its share of the speed and the tremor's share
-/// of speed and force are set so the harmonics of a held note without
+/// of the speed are set so the harmonics of a held note without
 /// vibrato flutter as on the anechoic recording: 0.3 to 0.6 dB per
 /// harmonic over 50 ms, a level that moves by 0.8 dB over 20 ms.
 const HAND_SPEED: f32 = 0.08;
@@ -1051,7 +1051,9 @@ impl ArchetVoice {
                 self.tremor = [y, self.tremor[0]];
                 y
             };
-            let hand_force = 1.0 + HAND_TREMOR * tremor * alive;
+            // The tremor moves the bow, not the pressure: a force that
+            // shook with it left the Schelleng window on the A string.
+            let hand_force = 1.0;
             let hand_speed = 1.0 + (HAND_SPEED * self.pink_amp.next() + HAND_TREMOR * tremor) * alive;
 
             // The bow's force and speed are established within about a string
