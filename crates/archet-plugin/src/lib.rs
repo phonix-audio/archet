@@ -341,6 +341,7 @@ impl ArchetParams {
             P::VibDelay => Some(&self.vib_delay),
             P::Ensemble => Some(&self.ensemble),
             P::TuneCents => Some(&self.tune_cents),
+            P::OutputLevel => Some(&self.output_level),
             _ => None,
         };
         if let Some(f) = float {
@@ -353,6 +354,7 @@ impl ArchetParams {
             P::Instrument => Some((&self.instrument, value as i32)),
             P::AutoRange => Some((&self.full_range, i32::from(value >= 0.5))),
             P::Pluck => Some((&self.articulation, i32::from(value >= 0.5))),
+            P::Polyphony => Some((&self.polyphony, value.round() as i32)),
             _ => None,
         };
         if let Some((i, v)) = int {

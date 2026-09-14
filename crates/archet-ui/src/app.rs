@@ -408,14 +408,14 @@ impl ArchetApp {
                                     self.patch.ensemble, 0.0, archet::engine::PLAYERS_MAX, "n", BODY) {
             self.set(ArchetParam::Ensemble, nv);
         }
-        let mut level = self.patch.output_level;
-        if let Some(nv) = self.knob(ui, geom::section_knob(band, 2), geom::KNOB, "LEVEL",
-                                    level, 0.0, 4.0, "n", TRUNK) {
-            level = nv;
-            self.patch.output_level = nv;
-            self.send(ArchetCommand::SetOutputLevel(nv));
+        if let Some(nv) = self.knob(ui, geom::section_knob(band, 1), geom::KNOB, "POLY",
+                                    self.patch.polyphony as f32, 1.0, 32.0, "n", BODY) {
+            self.set(ArchetParam::Polyphony, nv.round());
         }
-        let _ = level;
+        if let Some(nv) = self.knob(ui, geom::section_knob(band, 2), geom::KNOB, "LEVEL",
+                                    self.patch.output_level, 0.0, 4.0, "n", TRUNK) {
+            self.set(ArchetParam::OutputLevel, nv);
+        }
 
         let peak = self.cached_meter.peak_l.max(self.cached_meter.peak_r);
         machine::meter(ui, geom::meter(band), peak);

@@ -32,6 +32,7 @@ pub enum ArchetParam {
     VibRate, VibDepth, VibDelay,
     Ensemble, TuneCents,
     Instrument, AutoRange, Pluck,
+    OutputLevel, Polyphony,
 }
 
 impl ArchetParam {
@@ -64,6 +65,8 @@ impl ArchetParam {
             P::Instrument   => p.instrument = Instrument::from_index(value as usize),
             P::AutoRange    => p.auto_range = value >= 0.5,
             P::Pluck        => p.pluck = value >= 0.5,
+            P::OutputLevel  => p.output_level = value,
+            P::Polyphony    => p.polyphony = value.round().clamp(1.0, 48.0) as u8,
         }
     }
 }
