@@ -66,7 +66,7 @@ impl ArchetParam {
             P::AutoRange    => p.auto_range = value >= 0.5,
             P::Pluck        => p.pluck = value >= 0.5,
             P::OutputLevel  => p.output_level = value,
-            P::Polyphony    => p.polyphony = value.round().clamp(1.0, 48.0) as u8,
+            P::Polyphony    => p.polyphony = value.round().clamp(1.0, 128.0) as u8,
         }
     }
 }

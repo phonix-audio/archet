@@ -10,7 +10,10 @@ use super::body::{Biquad, ModalBody};
 use super::patch::ArchetPatch;
 use super::modal::ModalString;
 
-pub const MAX_VOICES: usize = 32;
+pub const MAX_VOICES: usize = 128;
+
+/// Frames a voice's line holds: the most the engine renders in one call.
+pub const SCRATCH_FRAMES: usize = 4096;
 const CTRL_INTERVAL: usize = 32;
 
 /// Small, fast white-noise source for bow scratch.
@@ -232,6 +235,8 @@ pub struct ArchetVoice {
 
     ctrl_counter: usize,
     // control-rate cached values
+    /// The block this voice rendered last, for the engine's sum.
+    line: Vec<f32>,
     bend: f32,
     /// The pitch-bend wheel as a frequency factor, and the modulation
     /// wheel's share of vibrato on top of the patch's.
@@ -327,6 +332,7 @@ impl ArchetVoice {
             steal_pending: None,
             pending_onset: 0,
             ctrl_counter: 0,
+            line: vec![0.0; SCRATCH_FRAMES],
             bend: 1.0,
             wheel_bend: 1.0,
             wheel_vib: 0.0,
@@ -342,6 +348,26 @@ impl ArchetVoice {
     /// Stage azimuth for this voice (-1 L .. +1 R); the ensemble seats each
     /// unison player. 0 for ordinary notes.
     pub fn pan(&self) -> f32 { self.unison_pan }
+
+    /// Render `n` frames of this voice into its line, silence if it is
+    /// not sounding.
+    pub fn render_block(&mut self, patch: &ArchetPatch, n: usize) {
+        let n = n.min(SCRATCH_FRAMES);
+        if self.is_active() {
+            let mut line = std::mem::take(&mut self.line);
+            for s in line[..n].iter_mut() {
+                *s = self.process(patch);
+            }
+            self.line = line;
+        } else {
+            self.line[..n].fill(0.0);
+        }
+    }
+
+    /// The block rendered last.
+    pub fn line(&self) -> &[f32] {
+        &self.line
+    }
     /// The wheels: the bend as a frequency factor, the modulation 0 to 1.
     pub fn set_wheels(&mut self, bend: f32, vib: f32) {
         self.wheel_bend = bend;

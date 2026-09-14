@@ -409,7 +409,7 @@ impl ArchetApp {
             self.set(ArchetParam::Ensemble, nv);
         }
         if let Some(nv) = self.knob(ui, geom::section_knob(band, 1), geom::KNOB, "POLY",
-                                    self.patch.polyphony as f32, 1.0, 32.0, "n", BODY) {
+                                    self.patch.polyphony as f32, 1.0, 128.0, "n", BODY) {
             self.set(ArchetParam::Polyphony, nv.round());
         }
         if let Some(nv) = self.knob(ui, geom::section_knob(band, 2), geom::KNOB, "LEVEL",

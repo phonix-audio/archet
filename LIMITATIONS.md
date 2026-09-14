@@ -106,11 +106,13 @@ a measurement, and what has been tried.
   behind the chain works only past full scale and comes back at 6 dB per
   second: a soft passage right after a loud one pushed there starts held
   down. Its lookahead reads sample peaks, not the ones between them.
-- The largest section, thirty-two voices holding a chord, costs about a
-  third of one core at 48 kHz in a release build (2026-09-14), the modal
-  string now the larger half of a voice; three such instances do not fit
-  on one core. The editor's load figure is the worst block of the recent
-  past.
+- The voices render on a pool of worker threads, every core but one up
+  to seven. A section of thirty-two voices holding a chord costs a tenth
+  of the audio thread's time at 48 kHz in a release build, the whole pool
+  of a hundred and twenty-eight voices a quarter (2026-09-15, an
+  eight-thread machine); on one core the figures are the pool's threads
+  times that. The editor's load figure is the audio thread's worst block
+  of the recent past.
 
 - On Linux the plugin pins its own library in memory at first
   instantiation (RTLD_NODELETE), because the wrapper installs a global

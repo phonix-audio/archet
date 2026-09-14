@@ -6,10 +6,11 @@
 
 use std::sync::mpsc;
 
+use phonix_rt::pool::Pool;
 use phonix_rt::{meter_channel, SharedReader, Writer};
 use super::patch::{ArchetParam, ArchetPatch};
 use super::sympathetic::SympStrings;
-use super::voice::{ArchetVoice, MAX_VOICES};
+use super::voice::{ArchetVoice, MAX_VOICES, SCRATCH_FRAMES};
 
 /// Physical voices a unison ever lights, whatever section size is asked
 /// for: the number of independent players past which the richness of a
@@ -75,13 +76,10 @@ pub const PLAYERS_MAX: f32 = 32.0;
 /// string. What holds a peak holds it for two of its periods.
 pub const LOWEST_HZ: f32 = 41.2;
 
-/// Frames a voice's line holds: the most the engine renders in one call.
-pub const SCRATCH_FRAMES: usize = 4096;
-
 pub struct ArchetEngine {
     voices: Vec<ArchetVoice>,
-    /// One block of each voice's output, rendered before the sum.
-    lines: Vec<Vec<f32>>,
+    /// The workers the voices render on, beside the audio thread.
+    pool: Pool,
     /// Each voice's constant-power gains for the block, reserved once.
     pans: Vec<(f32, f32)>,
     /// The pitch bend as a frequency factor, and the modulation wheel.
@@ -122,7 +120,7 @@ impl ArchetEngine {
     ) -> Self {
         Self {
             voices: (0..MAX_VOICES).map(|i| ArchetVoice::new(sample_rate, i)).collect(),
-            lines: (0..MAX_VOICES).map(|_| vec![0.0f32; SCRATCH_FRAMES]).collect(),
+            pool: Pool::new(Self::default_workers()),
             pans: Vec::with_capacity(MAX_VOICES),
             bend: 1.0,
             wheel: 0.0,
@@ -143,6 +141,16 @@ impl ArchetEngine {
             symp_level: 0.015,
             note_seq: 0,
         }
+    }
+
+    /// Workers beside the audio thread: every core but one, up to seven.
+    fn default_workers() -> usize {
+        std::thread::available_parallelism().map_or(0, |n| n.get().saturating_sub(1).min(7))
+    }
+
+    /// How many threads render the voices, the audio thread included.
+    pub fn set_workers(&mut self, threads: usize) {
+        self.pool = Pool::new(threads.saturating_sub(1));
     }
 
     /// Follow the host to a new rate. Everything that holds a rate is
@@ -241,17 +249,7 @@ impl ArchetEngine {
         let frames_now = frames.min(SCRATCH_FRAMES);
         {
             let patch = &self.patch;
-            let lines = &mut self.lines[..poly];
-            let voices = &mut self.voices[..poly];
-            for (v, line) in voices.iter_mut().zip(lines.iter_mut()) {
-                if v.is_active() {
-                    for s in line[..frames_now].iter_mut() {
-                        *s = v.process(patch);
-                    }
-                } else {
-                    line[..frames_now].fill(0.0);
-                }
-            }
+            self.pool.run_over(&mut self.voices[..poly], |_, v| v.render_block(patch, frames_now));
         }
         // Per-voice constant-power panning: in ensemble mode each unison
         // player is seated at its own azimuth, set at note-on. Other voices
@@ -271,7 +269,7 @@ impl ArchetEngine {
             let mut sl = 0.0f32;
             let mut sr_ = 0.0f32;
             for i in 0..poly {
-                let s = self.lines[i][frame_idx];
+                let s = self.voices[i].line()[frame_idx];
                 mono += s;
                 let (gl, gr) = self.pans[i];
                 if gl == 1.0 && gr == 1.0 {
@@ -2223,6 +2221,49 @@ mod profile {
         println!("  four-note chord peak in the bare engine: {peak:.2}");
     }
 
+    /// The same, with sixteen notes held: the whole pool of voices.
+    ///   cargo test --release --lib engine::profile::section_load_full -- --ignored --nocapture
+    #[test]
+    #[ignore = "diagnostic - run with --ignored"]
+    fn section_load_full() {
+        let sr = 48_000.0_f32;
+        let block = 512usize;
+        let bank = crate::patch::ArchetPatch::factory_presets();
+        let preset = bank
+            .iter()
+            .find(|p| p.name == "Violin Section Large")
+            .expect("the bank no longer has Violin Section Large");
+        let (mut eng, tx, _mr) = ArchetEngine::new_for_plugin(sr);
+        let preset = ArchetPatch { polyphony: 16, ..preset.clone() };
+        tx.send(ArchetCommand::LoadPatch(Box::new(preset.clone()))).unwrap();
+        for n in [48u8, 52, 55, 59, 60, 62, 64, 65, 67, 69, 71, 72, 74, 76, 79, 84] {
+            tx.send(ArchetCommand::NoteOn(n, 110)).unwrap();
+        }
+        let secs = 5.0f32;
+        let blocks = (secs * sr) as usize / block;
+        let mut buf = vec![0.0f32; block * 2];
+        let t0 = std::time::Instant::now();
+        for _ in 0..blocks {
+            buf.fill(0.0);
+            eng.process_audio(&mut buf, 2);
+        }
+        let wall = t0.elapsed().as_secs_f32();
+        let lit = eng.voices.iter().filter(|v| v.is_active()).count();
+        println!(
+            "  {lit} voices lit: {secs:.1} s of audio in {wall:.2} s, {:.0} % of one core",
+            100.0 * wall / secs
+        );
+        // The chord's peak over its last second, what a chain's ceiling
+        // would have to hold.
+        let mut peak = 0.0f32;
+        for _ in 0..((1.0 * sr) as usize / block) {
+            buf.fill(0.0);
+            eng.process_audio(&mut buf, 2);
+            peak = peak.max(buf.iter().fold(0.0f32, |m, x| m.max(x.abs())));
+        }
+        println!("  four-note chord peak in the bare engine: {peak:.2}");
+    }
+
     /// A held bowed note at three dynamics, for comparison with a recording.
     ///
     /// The solo violin patch holds a B flat on the A string, a stopped note
@@ -2833,7 +2874,7 @@ mod audit_tests {
     fn load_patch_clamps_polyphony() {
         let (mut eng, tx, _mr) = ArchetEngine::new_for_plugin(48_000.0);
         let mut p = ArchetPatch::violin();
-        p.polyphony = 48;
+        p.polyphony = 200;
         tx.send(ArchetCommand::LoadPatch(Box::new(p))).unwrap();
         let mut buf = vec![0.0f32; 128];
         eng.process_audio(&mut buf, 2);

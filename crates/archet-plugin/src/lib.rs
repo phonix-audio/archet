@@ -212,7 +212,7 @@ impl ArchetParams {
             output_level: FloatParam::new("Output Level", 1.0, FloatRange::Linear { min: 0.0, max: 4.0 })
                 .with_value_to_string(formatters::v2s_f32_rounded(2)),
 
-            polyphony: IntParam::new("Polyphony", 8, IntRange::Linear { min: 1, max: 48 }),
+            polyphony: IntParam::new("Polyphony", 8, IntRange::Linear { min: 1, max: 128 }),
 
             instrument: IntParam::new("Instrument", 0, IntRange::Linear { min: 0, max: 3 })
                 .with_value_to_string(Arc::new(|v| {
@@ -301,7 +301,7 @@ impl ArchetParams {
             instrument:     inst,
             auto_range:     self.full_range.value() != 0,
             pluck:          self.articulation.value() != 0,
-            polyphony:      self.polyphony.value().clamp(1, 48) as u8,
+            polyphony:      self.polyphony.value().clamp(1, 128) as u8,
             bow_pos:        self.bow_pos.value(),
             bow_vel:        self.bow_vel.value(),
             bow_force:      self.bow_force.value(),

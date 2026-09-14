@@ -14,7 +14,8 @@ and double bass, each with its own measured modes; sympathetic open strings
 behind them; a pizzicato that releases the same string from a finger and lets
 it ring with the per-partial decays measured on each open string, then mutes
 it with the hand; and a section mode that renders a decorrelated desk of
-players rather than phase-locked clones. `REFERENCES.md` lists the sources.
+players rather than phase-locked clones, a hundred and twenty-eight
+voices on a pool of worker threads. `REFERENCES.md` lists the sources.
 
 ## The editor
 
