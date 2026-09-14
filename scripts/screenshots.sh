@@ -31,6 +31,9 @@ if [[ ${1:-} == --check ]]; then
         elif [[ ! -f $DEST/$name.png ]] || ! cmp -s "$SRC/$name.png" "$DEST/$name.png"; then
             echo "out of date: $DEST/$name.png" >&2
             missing=1
+        elif ! grep -q "$DEST/$name.png" README.md; then
+            echo "the README does not show $DEST/$name.png" >&2
+            missing=1
         fi
     done < docs/screenshots.list
     [[ $missing -eq 0 ]] || {

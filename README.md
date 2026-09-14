@@ -56,8 +56,10 @@ the factory bank never reaches it. Nothing in the engine clips.
 
 ## Effects
 
-The engine owns no effects. Each patch describes a chain of three, in a
-fixed order, that the plugin runs after the engine: a parametric
+Every patch carries a chain of three effects, in a fixed order, that
+the plugin runs after the engine and the editor shows on its effects
+page; the engine itself owns none of them, so its tests hear the
+instrument bare. The three: a parametric
 equaliser, flat by design since the bodies are calibrated on recordings;
 a reverb, because a string radiates into a room and the model has no
 walls of its own, set per preset to a chamber for a soloist, a hall for a
