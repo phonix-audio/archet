@@ -16,6 +16,12 @@ pub const MAX_VOICES: usize = 128;
 pub const SCRATCH_FRAMES: usize = 4096;
 const CTRL_INTERVAL: usize = 32;
 
+/// A plucked string's second transverse plane: its detune against the
+/// first and its level, the medians of the doublets measured on the
+/// anechoic open violin strings (see the plucked note-on).
+const PLANE_DETUNE: f32 = 0.003;
+const PLANE_LEVEL: f32 = 0.355;
+
 /// Small, fast white-noise source for bow scratch.
 #[derive(Debug, Clone)]
 struct Noise {
@@ -242,6 +248,13 @@ pub struct ArchetVoice {
     /// wheel's share of vibrato on top of the patch's.
     wheel_bend: f32,
     wheel_vib: f32,
+    /// What a plucked note was laid out with, so its strings can be laid
+    /// out again when the bend or the vibrato moves the pitch: the spot,
+    /// the stiffness, the damping scale, and the pitch ratio applied now.
+    pluck_spot: f32,
+    pluck_stiff: f32,
+    pluck_damping: f32,
+    pluck_ratio: f32,
     bow_vel: f32,
     noise_amt: f32,
 }
@@ -336,6 +349,10 @@ impl ArchetVoice {
             bend: 1.0,
             wheel_bend: 1.0,
             wheel_vib: 0.0,
+            pluck_spot: 0.1,
+            pluck_stiff: 0.0,
+            pluck_damping: 1.0,
+            pluck_ratio: 1.0,
             bow_vel: 0.0,
             noise_amt: 0.0,
         }
@@ -368,6 +385,36 @@ impl ArchetVoice {
     pub fn line(&self) -> &[f32] {
         &self.line
     }
+    /// A plucked note follows the bend wheel and the vibrato: when the
+    /// pitch it should sound has moved, both planes are laid out again at
+    /// it, their decays kept at the note's own. Checked every control tick,
+    /// laid out at most every eighth, as the bowed string is.
+    fn retune_pluck(&mut self, patch: &ArchetPatch) {
+        let dt = CTRL_INTERVAL as f32 / self.sr;
+        self.note_time += dt;
+        let rate = patch.vib_rate.max(0.0);
+        self.vib_phase = (self.vib_phase + rate * dt).fract();
+        let since = self.note_time - patch.vib_delay;
+        let env = if since < 0.0 { 0.0 } else { 1.0 - (1.0 - VIB_FIRST_CYCLE) * (-(since * rate)).exp() };
+        let cents = (self.vib_phase * std::f32::consts::TAU).sin() * patch.vib_depth * (1.0 + self.wheel_vib) * env;
+        let ratio = self.wheel_bend * 2f32.powf(cents / 1200.0);
+        self.modal_recalc = self.modal_recalc.wrapping_add(1);
+        if (ratio - self.pluck_ratio).abs() < 1e-5 || !self.modal_recalc.is_multiple_of(8) {
+            return;
+        }
+        let Some((inst, string)) = self.on_string else { return };
+        self.pluck_ratio = ratio;
+        let (f0, stiff, damping) = (self.freq_hz, self.pluck_stiff, self.pluck_damping);
+        let measured = Self::measured_pizz_t60(inst, string);
+        let t60law = move |k: usize| -> f32 {
+            let kf = k as f32;
+            let sk = stiff * kf * kf;
+            Self::t60_from_table(measured, f0 * kf * (1.0 + sk).sqrt()) / damping
+        };
+        self.modal.set_voice_t60(f0 * ratio, stiff, self.pluck_spot, &t60law);
+        self.modal_b.set_voice_t60(f0 * ratio * (1.0 + PLANE_DETUNE), stiff, self.pluck_spot, &t60law);
+    }
+
     /// The wheels: the bend as a frequency factor, the modulation 0 to 1.
     pub fn set_wheels(&mut self, bend: f32, vib: f32) {
         self.wheel_bend = bend;
@@ -828,6 +875,10 @@ impl ArchetVoice {
                 let sk = stiff * kf * kf;
                 Self::t60_from_table(measured, f0 * kf * (1.0 + sk).sqrt()) / damping
             };
+            self.pluck_spot = p;
+            self.pluck_stiff = stiff;
+            self.pluck_damping = damping;
+            self.pluck_ratio = 1.0;
             self.modal.noise_amt = 0.0;
             self.modal.set_voice_t60(self.freq_hz, stiff, p, &t60law);
             self.modal.reset();
@@ -839,8 +890,6 @@ impl ArchetVoice {
             // two figures here are the medians of those measurements, the
             // detune of the second plane and its level. The two planes share
             // the loss table, since their losses were not measured apart.
-            const PLANE_DETUNE: f32 = 0.003;
-            const PLANE_LEVEL: f32 = 0.355;
             self.modal_b.noise_amt = 0.0;
             self.modal_b.set_voice_t60(self.freq_hz * (1.0 + PLANE_DETUNE), stiff, p, &t60law);
             self.modal_b.reset();
@@ -1042,6 +1091,10 @@ impl ArchetVoice {
         // drives radiates it. On note-off the hand mutes it at the pace of
         // the release control; a finger landing on the same string stops it.
         if patch.pluck {
+            if self.ctrl_counter == 0 {
+                self.retune_pluck(patch);
+            }
+            self.ctrl_counter = (self.ctrl_counter + 1) % CTRL_INTERVAL;
             // While the key is held the string rings by its measured losses.
             // A finger landing on the same string ends it at once; the hand
             // muting after the key is up ends it at the release control's

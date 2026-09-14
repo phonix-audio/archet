@@ -1948,6 +1948,10 @@ mod profile {
             let note = note_for(param);
             let (mut eng, tx, _mr) = ArchetEngine::new_for_plugin(sr);
             let mut p = preset.clone();
+            // The vibrato's rate and delay are heard only under a depth.
+            if matches!(param, P::VibRate | P::VibDelay) && p.vib_depth <= 0.0 {
+                p.vib_depth = 20.0;
+            }
             param.apply(&mut p, value);
             tx.send(ArchetCommand::LoadPatch(Box::new(p))).unwrap();
             let mut buf = vec![0.0f32; block * 2];
@@ -3061,4 +3065,61 @@ mod scale {
         assert!((-3.0..=0.0).contains(&db), "the largest section's chord peaks at {db:.1} dBFS");
     }
 
+}
+
+#[cfg(test)]
+mod wheels {
+    use super::*;
+
+    /// The fundamental of a held note's middle second: the strongest
+    /// component between a fifth under and a fifth over the unbent note,
+    /// read off a one-hertz grid by a direct sum, so a bowed note's rich
+    /// harmonics do not count.
+    fn pitch_of(patch: ArchetPatch, bend: f32) -> f32 {
+        let sr = 48_000.0f32;
+        let block = 256usize;
+        let (mut eng, tx, _mr) = ArchetEngine::new_for_plugin(sr);
+        tx.send(ArchetCommand::LoadPatch(Box::new(patch))).unwrap();
+        tx.send(ArchetCommand::PitchBend(bend)).unwrap();
+        let mut buf = vec![0.0f32; block * 2];
+        eng.process_audio(&mut buf, 2);
+        tx.send(ArchetCommand::NoteOn(69, 100)).unwrap();
+        let mut out: Vec<f32> = Vec::new();
+        for _ in 0..((1.2 * sr) as usize / block) {
+            buf.fill(0.0);
+            eng.process_audio(&mut buf, 2);
+            out.extend(buf.iter().step_by(2));
+        }
+        let held = &out[(0.2 * sr) as usize..(1.2 * sr) as usize];
+        let n = held.len() as f32;
+        let power = |hz: f32| {
+            let w = std::f32::consts::TAU * hz / sr;
+            let (mut re, mut im) = (0.0f32, 0.0f32);
+            for (i, x) in held.iter().enumerate() {
+                let win = 0.5 - 0.5 * (std::f32::consts::TAU * i as f32 / n).cos();
+                re += x * win * (w * i as f32).cos();
+                im += x * win * (w * i as f32).sin();
+            }
+            re * re + im * im
+        };
+        (293..=660).map(|hz| hz as f32).fold((0.0f32, 0.0f32), |best, hz| {
+            let p = power(hz);
+            if p > best.1 { (hz, p) } else { best }
+        }).0
+    }
+
+    /// Two semitones of bend raise a bowed note and a plucked note alike.
+    #[test]
+    fn the_bend_raises_bowed_and_plucked_notes() {
+        let want = 2f32.powf(2.0 / 12.0);
+        let mut bowed = ArchetPatch::violin();
+        bowed.vib_depth = 0.0;
+        let mut plucked = ArchetPatch::violin();
+        plucked.pluck = true;
+        plucked.vib_depth = 0.0;
+        for (name, p) in [("bowed", bowed), ("plucked", plucked)] {
+            let ratio = pitch_of(p.clone(), 2.0) / pitch_of(p, 0.0);
+            assert!((ratio / want - 1.0).abs() < 0.03, "{name}: bend ratio {ratio:.3}, want {want:.3}");
+        }
+    }
 }
