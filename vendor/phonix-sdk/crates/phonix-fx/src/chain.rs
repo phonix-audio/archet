@@ -52,14 +52,6 @@ impl Effect for Placeholder {
     fn set_sample_rate(&mut self, _sample_rate: f32) {}
 }
 
-/// Beyond full scale the curve bends to an asymptote at 2; the result is
-/// clamped to +-1.5.
-#[inline]
-fn soft_clip(x: f32) -> f32 {
-    let y = if x.abs() <= 1.0 { x } else { x.signum() * (2.0 - 1.0 / x.abs()) };
-    y.clamp(-1.5, 1.5)
-}
-
 /// A ring buffer that delays one channel by a fixed count.
 struct DryLine {
     buf: Vec<f32>,
@@ -451,13 +443,8 @@ impl Chain {
                 slot.dry_r.run(&mut self.scratch_r[..n], latency);
                 let (wet, dry) = (slot.mix_wet, slot.mix_dry);
                 for i in 0..n {
-                    l[i] = soft_clip(self.scratch_l[i] * dry + l[i] * wet);
-                    r[i] = soft_clip(self.scratch_r[i] * dry + r[i] * wet);
-                }
-            } else {
-                for i in 0..n {
-                    l[i] = soft_clip(l[i]);
-                    r[i] = soft_clip(r[i]);
+                    l[i] = self.scratch_l[i] * dry + l[i] * wet;
+                    r[i] = self.scratch_r[i] * dry + r[i] * wet;
                 }
             }
             let mut peak = if offset == 0 { 0.0 } else { slot.peak };
@@ -700,14 +687,16 @@ mod tests {
     }
 
     #[test]
-    fn a_slot_that_goes_past_full_scale_is_bent_and_one_that_goes_non_finite_is_bypassed() {
+    fn a_slot_past_full_scale_is_left_as_it_is_and_one_that_goes_non_finite_is_bypassed() {
         let spec = ChainSpec::new(vec![SlotSpec::new("test-gain").with("gain", 2.0_f32)]);
         let mut chain = Chain::new(48_000.0, 64);
         chain.apply(&spec, &registry());
         let mut l = [0.9_f32; 4];
         let mut r = [0.9_f32; 4];
         run(&mut chain, &mut l, &mut r);
-        assert!((l[0] - (2.0 - 1.0 / 1.8)).abs() < 1e-6, "{}", l[0]);
+        // The chain does not bend what passes full scale: the plugin's fader
+        // after it holds the output, and a curve here would clip a chord.
+        assert!((l[0] - 1.8).abs() < 1e-6, "{}", l[0]);
         chain.set_param(ParamRef { slot: 0, index: 0 }, Value::F(f32::NAN));
         let mut l = [0.25_f32; 4];
         let mut r = [0.5_f32; 4];
