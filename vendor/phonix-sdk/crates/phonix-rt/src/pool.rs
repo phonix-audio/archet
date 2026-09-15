@@ -45,9 +45,9 @@ pub struct Pool {
 }
 
 impl Pool {
-    /// A pool of `workers` threads beside the caller. Zero workers is a
-    /// pool that runs everything on the caller, which is what a single
-    /// core gets.
+    /// A pool of up to `workers` threads beside the caller, as many as the
+    /// system grants. Zero workers is a pool that runs everything on the
+    /// caller, which is what a single core gets.
     pub fn new(workers: usize) -> Self {
         let shared = Arc::new(Shared {
             generation: Mutex::new(0),
@@ -57,15 +57,17 @@ impl Pool {
             remaining: AtomicUsize::new(0),
             stop: AtomicBool::new(false),
         });
-        let handles = (0..workers)
-            .map(|i| {
-                let shared = Arc::clone(&shared);
-                std::thread::Builder::new()
-                    .name(format!("phonix-pool-{i}"))
-                    .spawn(move || worker(&shared))
-                    .expect("a worker thread")
-            })
-            .collect();
+        // A worker the system will not make is a worker fewer, never a
+        // panic: a host that locks its memory or caps its threads can
+        // refuse one, and a panic here takes the host down with the plugin.
+        let mut handles = Vec::with_capacity(workers);
+        for i in 0..workers {
+            let shared = Arc::clone(&shared);
+            match std::thread::Builder::new().name(format!("phonix-pool-{i}")).spawn(move || worker(&shared)) {
+                Ok(h) => handles.push(h),
+                Err(_) => break,
+            }
+        }
         Self { shared, workers: handles }
     }
 
