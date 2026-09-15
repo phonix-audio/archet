@@ -445,7 +445,10 @@ impl Plugin for ArchetPlugin {
         names:                PortNames::const_default(),
     }];
 
-    const MIDI_INPUT:  MidiConfig = MidiConfig::Basic;
+    // MidiCCs, not Basic: nice-plug only publishes the IMidiMapping a VST3
+    // host needs when this is MidiCCs, and without it a VST3 host sends no
+    // pitch bend and no controller at all.
+    const MIDI_INPUT:  MidiConfig = MidiConfig::MidiCCs;
     const MIDI_OUTPUT: MidiConfig = MidiConfig::None;
 
     type SysExMessage = ();
