@@ -132,16 +132,18 @@ pub fn keyboard_ui(ui: &mut Ui, state: &mut KeyboardState, style: &KeyboardStyle
     if style.header {
         ui.horizontal(|ui| {
             let pal = Palette::of(ui.ctx());
-            ui.label(RichText::new("OCT").color(pal.text_dim).size(10.0).strong());
-            if ui.small_button("-").clicked() { state.octave = state.octave.saturating_sub(1); }
-            ui.label(RichText::new(format!("{}", state.octave)).color(pal.text_primary).size(11.0));
-            if ui.small_button("+").clicked() && state.octave < 9 { state.octave += 1; }
+            ui.label(RichText::new("OCT").color(pal.text_dim).size(pal.type_caption));
+            match crate::controls::flow_stepper(ui, 52.0, &format!("{}", state.octave), (style.id_salt, "octave")) {
+                Some(-1) => state.octave = state.octave.saturating_sub(1),
+                Some(_) if state.octave < 9 => state.octave += 1,
+                _ => {}
+            }
             let base = state.octave as i32 * 12;
             ui.add_space(8.0);
             ui.label(RichText::new(format!("{}{} .. {}{}",
                 note_name((base as u8) % 12), (base / 12) - 1,
                 "C", (base / 12) - 1 + state.octaves_shown as i32))
-                .color(pal.text_dim).size(9.0));
+                .color(pal.text_dim).size(pal.type_caption));
         });
     }
 
@@ -190,29 +192,39 @@ fn draw_wheel(
         *value = 0.0;
         changed = Some(0.0);
     }
-    // Groove + position marker.
-    let painter = ui.painter();
-    painter.rect_filled(rect, 3u8, Color32::from_rgb(24, 24, 29));
+    // The wheel in its well: a drum shaded round its axis, ribbed, with
+    // the accent line across it where it stands.
     let pal = Palette::of(ui.ctx());
-    painter.rect_stroke(rect, 3u8, Stroke::new(0.5_f32, pal.border), egui::StrokeKind::Outside);
+    let well = Rect::from_min_max(rect.min, Pos2::new(rect.right(), rect.bottom() - 14.0));
+    crate::theme::recess(ui, well, 3.0);
+    let drum = well.shrink2(Vec2::new(2.5, 3.0));
+    let mid = drum.center().y;
+    let half = drum.height() * 0.5;
+    let rib = 3.0;
     let t = (*value - lo) / (hi - lo);
-    let y = rect.bottom() - t * rect.height();
-    painter.line_segment(
-        [Pos2::new(rect.left() + 2.0, y), Pos2::new(rect.right() - 2.0, y)],
-        Stroke::new(3.0_f32, accent),
-    );
-    if snap_back {
-        // Center detent line.
-        let cy = rect.center().y;
-        painter.line_segment(
-            [Pos2::new(rect.left(), cy), Pos2::new(rect.right(), cy)],
-            Stroke::new(0.5_f32, Color32::from_rgb(70, 72, 80)),
-        );
+    let phase = (t - 0.5) * drum.height();
+    let painter = ui.painter();
+    let mut y = drum.top();
+    while y < drum.bottom() {
+        let u = ((y - mid) / half).clamp(-1.0, 1.0);
+        let shade = (1.0 - u * u).sqrt() * (0.55 + 0.45 * (-u).max(0.0));
+        let c = crate::theme::lerp_colour(pal.well, crate::theme::lighten(pal.bg_raised, 0.25), shade);
+        painter.rect_filled(Rect::from_min_max(Pos2::new(drum.left(), y), Pos2::new(drum.right(), (y + 1.0).min(drum.bottom()))), 0.0, c);
+        y += 1.0;
     }
-    painter.text(
-        Pos2::new(rect.center().x, rect.bottom() - 7.0),
-        Align2::CENTER_CENTER, label, FontId::proportional(8.0), pal.text_dim,
-    );
+    let mut ry = mid - half - phase.rem_euclid(rib);
+    while ry < drum.bottom() {
+        if ry > drum.top() {
+            painter.line_segment([Pos2::new(drum.left(), ry), Pos2::new(drum.right(), ry)], Stroke::new(1.0_f32, pal.well.gamma_multiply(0.6)));
+        }
+        ry += rib;
+    }
+    let my = drum.bottom() - t * drum.height();
+    painter.line_segment([Pos2::new(drum.left(), my), Pos2::new(drum.right(), my)], Stroke::new(2.5_f32, accent));
+    if snap_back {
+        painter.line_segment([Pos2::new(well.left() - 3.0, well.center().y), Pos2::new(well.left() - 0.5, well.center().y)], Stroke::new(1.0_f32, pal.silk_dim));
+    }
+    crate::theme::printed(ui, Pos2::new(rect.center().x, rect.bottom() - 6.0), label, FontId::proportional(pal.type_caption), pal.text_dim, Align2::CENTER_CENTER);
     changed
 }
 
@@ -318,45 +330,58 @@ fn keyboard_keys(ui: &mut Ui, state: &mut KeyboardState, style: &KeyboardStyle, 
     }
 
     // ── Draw ──
+    // The key bed the keys sit in, then ivories shaded from the player's
+    // side, then the sharps, each casting its shadow on the ivories below.
+    let bed = full_rect.expand2(Vec2::new(3.0, 0.0));
     let painter = ui.painter();
+    painter.rect_filled(bed, 2.0, pal.well_edge);
+    painter.line_segment([Pos2::new(bed.left(), bed.top() + 0.5), Pos2::new(bed.right(), bed.top() + 0.5)], Stroke::new(2.0_f32, Color32::from_rgb(8, 8, 10)));
     let plays = |note: u8| style.range.is_none_or(|(lo, hi)| (lo..=hi).contains(&note));
+    let lower = egui::CornerRadius { nw: 0, ne: 0, sw: 3, se: 3 };
     for key in keys.iter().filter(|k| !k.is_black) {
-        // Lit = held with the mouse OR sounding from MIDI/the engine (state.active).
         let held = state.held.contains(&key.note) || state.active.contains(&key.note);
         let is_hovered = hovered == Some(key.note);
         let is_c = key.note % 12 == 0;
-        let fill = if held { style.accent }
-            else if is_hovered { Color32::from_rgb(200, 210, 220) }
-            else if !plays(key.note) { Color32::from_rgb(132, 136, 141) }
-            else if is_c { Color32::from_rgb(182, 192, 202) }
-            else { Color32::from_rgb(212, 217, 222) };
-        painter.rect_filled(key.rect, 3u8, fill);
-        painter.rect_stroke(key.rect, 3u8,
-            Stroke::new(if held { 2.0_f32 } else { 0.5_f32 }, if held { Color32::WHITE } else { pal.border }),
-            egui::StrokeKind::Outside);
+        let ivory = if !plays(key.note) { Color32::from_rgb(132, 134, 136) }
+            else if is_c { Color32::from_rgb(214, 216, 212) }
+            else { Color32::from_rgb(232, 232, 226) };
+        let r = if held { key.rect.translate(Vec2::new(0.0, 1.0)) } else { key.rect };
+        let (top, bottom) = if held {
+            (style.accent.gamma_multiply(0.8), style.accent)
+        } else if is_hovered {
+            (crate::theme::lighten(ivory, 0.25), ivory)
+        } else {
+            (ivory.gamma_multiply(0.86), ivory)
+        };
+        crate::theme::gradient_rounded(ui, r, lower, top, bottom);
+        let p = ui.painter();
+        p.rect_stroke(r, lower, Stroke::new(0.8_f32, Color32::from_rgb(70, 70, 74)), egui::StrokeKind::Inside);
+        if !held {
+            p.line_segment([Pos2::new(r.left() + 2.0, r.bottom() - 1.5), Pos2::new(r.right() - 2.0, r.bottom() - 1.5)], Stroke::new(1.5_f32, Color32::from_rgba_unmultiplied(0, 0, 0, 40)));
+        }
         if style.labels && is_c {
             let oct = (key.note / 12).saturating_sub(1);
-            painter.text(Pos2::new(key.rect.center().x, key.rect.bottom() - 9.0),
-                Align2::CENTER_CENTER, format!("C{}", oct), FontId::proportional(9.0),
-                if held { Color32::BLACK } else { Color32::from_rgb(90, 95, 100) });
+            p.text(Pos2::new(r.center().x, r.bottom() - 9.0),
+                Align2::CENTER_CENTER, format!("C{}", oct), FontId::proportional(pal.type_caption),
+                if held { Color32::BLACK } else { Color32::from_rgb(110, 112, 116) });
         }
     }
     for key in keys.iter().filter(|k| k.is_black) {
         let held = state.held.contains(&key.note) || state.active.contains(&key.note);
         let is_hovered = hovered == Some(key.note);
-        let fill = if held { style.accent }
-            else if is_hovered { Color32::from_rgb(60, 65, 70) }
+        let p = ui.painter();
+        p.rect_filled(key.rect.translate(Vec2::new(1.5, 2.5)).expand(0.5), 2.0, Color32::from_rgba_unmultiplied(0, 0, 0, 90));
+        let body = if held { style.accent.gamma_multiply(0.7) }
             else if !plays(key.note) { Color32::from_rgb(52, 52, 56) }
-            else { Color32::from_rgb(24, 24, 29) };
-        painter.rect_filled(key.rect, 2u8, fill);
-        painter.rect_stroke(key.rect, 2u8,
-            Stroke::new(if held { 1.5_f32 } else { 0.5_f32 }, if held { style.accent } else { Color32::from_rgb(14, 14, 17) }),
-            egui::StrokeKind::Outside);
-        if !held {
-            let hl = Rect::from_min_size(key.rect.left_top(), Vec2::new(key.rect.width(), 2.0));
-            painter.rect_filled(hl, 2u8, Color32::from_rgb(48, 50, 56));
-        }
+            else { Color32::from_rgb(20, 20, 24) };
+        let r = if held { key.rect.translate(Vec2::new(0.0, 1.0)) } else { key.rect };
+        crate::theme::gradient_rounded(ui, r, lower, body, crate::theme::lighten(body, 0.06));
+        let face = Rect::from_min_max(Pos2::new(r.left() + 1.5, r.top()), Pos2::new(r.right() - 1.5, r.bottom() - r.height() * 0.12));
+        let lit = if held { style.accent } else if is_hovered { Color32::from_rgb(70, 72, 80) } else { Color32::from_rgb(44, 45, 52) };
+        crate::theme::gradient_rounded(ui, face, lower, crate::theme::lerp_colour(body, lit, 0.4), lit);
+        ui.painter().rect_stroke(r, lower, Stroke::new(0.8_f32, Color32::from_rgb(6, 6, 8)), egui::StrokeKind::Inside);
     }
+    let painter = ui.painter();
     // The span the instrument plays, underlined in the accent along the
     // bottom edge of its white keys.
     if let Some((lo, hi)) = style.range {
@@ -460,13 +485,13 @@ mod tests {
         state.held = vec![60, 64, 67]; // C major triad highlighted
         let style = KeyboardStyle { accent: ACCENT_SEQ, height: 68.0, labels: true, wheels: false,
             velocity: 110, velocity_by_y: true, header: true,
-            id_salt: "snap_kbd" };
+            id_salt: "snap_kbd", range: Some((48, 84)) };
         let mut harness = Harness::builder()
             .with_size(Vec2::new(560.0, 130.0))
-            .build(move |ctx| {
-                CentralPanel::default().show(ctx, |ui| {
-                    keyboard_ui(ui, &mut state, &style);
-                });
+            .build_ui(move |ui| {
+                Palette::DEFAULT.install(ui.ctx());
+                Palette::DEFAULT.apply_visuals(ui.ctx());
+                keyboard_ui(ui, &mut state, &style);
             });
         harness.run_steps(2);
         harness.snapshot("keyboard_widget");

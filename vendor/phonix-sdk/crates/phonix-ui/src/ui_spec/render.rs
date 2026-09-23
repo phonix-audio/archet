@@ -103,7 +103,11 @@ pub fn render_spec(
 ) {
     let (accent, knob, idx) = spec_header(ui, spec, tab_state);
     if let Some(tab) = spec.tabs.get(idx) {
+        // An id from its place in the layout: two editors side by side must
+        // not share one scroll.
+        let id = ui.next_auto_id();
         egui::ScrollArea::vertical()
+            .id_salt(id)
             .auto_shrink([false, true])
             .show(ui, |ui| {
                 render_tab(ui, tab, accent, knob, spec.columns, access, custom);
@@ -385,25 +389,18 @@ fn render_control(
             }
         }),
         ControlKind::Toggle => vcell(ui, knob, |ui| {
-            let mut b = access.get_bool(&c.param).unwrap_or(false);
-            if ui.checkbox(&mut b, &c.label).changed() {
-                access.set_bool(&c.param, b);
+            let b = access.get_bool(&c.param).unwrap_or(false);
+            if crate::controls::flow_lamp(ui, &c.label.to_uppercase(), b, accent).clicked() {
+                access.set_bool(&c.param, !b);
             }
         }),
         ControlKind::Latch { width, height } => {
-            let mut b = access.get_bool(&c.param).unwrap_or(false);
+            let b = access.get_bool(&c.param).unwrap_or(false);
             let size = egui::vec2(width.unwrap_or(34.0), height.unwrap_or(22.0));
-            let fill = if b { accent } else { ui.visuals().widgets.inactive.bg_fill };
-            let fg = if b { egui::Color32::WHITE } else { ui.visuals().weak_text_color() };
-            let r = ui.add(
-                egui::Button::new(egui::RichText::new(&c.label).color(fg).size(11.0))
-                    .fill(fill)
-                    .min_size(size)
-                    .corner_radius(3.0),
-            );
+            let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+            let r = crate::controls::button(ui, rect, &c.label, b, accent, ("uispec_latch", c.param.as_str()));
             if r.clicked() {
-                b = !b;
-                access.set_bool(&c.param, b);
+                access.set_bool(&c.param, !b);
             }
         }
         ControlKind::Adsr => render_adsr(ui, &c.param, accent, knob, access),
@@ -513,23 +510,20 @@ fn render_combo(ui: &mut Ui, c: &ControlSpec, options: &[EnumOption], access: &m
         .find(|o| Some(o.value.as_str()) == cur.as_deref())
         .map(EnumOption::display)
         .unwrap_or("");
+    let pal = crate::theme::Palette::of(ui.ctx());
     if !c.label.is_empty() {
-        ui.label(egui::RichText::new(&c.label).size(9.0).color(crate::theme::Palette::of(ui.ctx()).text_dim));
+        ui.label(egui::RichText::new(c.label.to_uppercase()).size(pal.type_caption).color(pal.text_dim));
     }
+    let _ = cur_label;
     let mut chosen: Option<String> = None;
-    egui::ComboBox::from_id_salt(("uispec_combo", c.param.as_str(), c.label.as_str()))
-        // Fixed width so a long selected option never shoves the next control in
-        // the declarative row (combos without a cell_width used to auto-size).
-        .width(c.cell_width.map(|w| (w - 8.0).max(48.0)).unwrap_or(108.0))
-        .selected_text(cur_label)
-        .show_ui(ui, |ui| {
-            for o in options {
-                let sel = cur.as_deref() == Some(o.value.as_str());
-                if ui.selectable_label(sel, o.display()).clicked() {
-                    chosen = Some(o.value.clone());
-                }
-            }
-        });
+    // Fixed width, so a long option never shoves the next control in the row.
+    let w = c.cell_width.map(|w| (w - 8.0).max(48.0)).unwrap_or(108.0);
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(w, 20.0), egui::Sense::hover());
+    let items: Vec<&str> = options.iter().map(EnumOption::display).collect();
+    let sel = options.iter().position(|o| cur.as_deref() == Some(o.value.as_str())).unwrap_or(usize::MAX);
+    if let Some(i) = crate::controls::list_well(ui, rect, &c.label, &items, sel, pal.accent, ("uispec_combo", c.param.as_str(), c.label.as_str())) {
+        chosen = options.get(i).map(|o| o.value.clone());
+    }
     if let Some(v) = chosen {
         if is_int {
             if let Ok(iv) = v.parse::<i64>() {

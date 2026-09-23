@@ -1,0 +1,11 @@
+[package]
+name = "phonix-surface"
+version = "0.3.0"
+edition = "2021"
+license = "MIT"
+description = "A control surface's protocol: what its encoders and keys say, what its lamps and display are told. No MIDI port, no GUI."
+keywords = ["audio", "midi", "control-surface"]
+categories = ["multimedia::audio"]
+repository = "https://github.com/phonix-audio/phonix-sdk"
+
+[dependencies]

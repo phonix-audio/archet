@@ -901,9 +901,9 @@ mod tests {
     #[ignore]
     fn a_preset_change_puts_the_edited_chain_back() {
         let Some(home) = std::env::var_os("HOME") else { return };
-        let path = PathBuf::from(home).join(".clap").join("Cordis.clap");
+        let path = PathBuf::from(home).join(".clap").join("Phonix Piano.clap");
         if !path.exists() {
-            eprintln!("Cordis.clap is not installed; skipping");
+            eprintln!("Phonix Piano.clap is not installed; skipping");
             return;
         }
         let load = || ClapPlugin::load(&path, None, 48_000.0, 512).expect("load");

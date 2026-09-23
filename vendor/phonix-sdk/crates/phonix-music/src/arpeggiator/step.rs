@@ -14,7 +14,7 @@ pub enum StepType {
 }
 
 /// Per-step data in a rhythm pattern
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct StepData {
     pub step_type: StepType,
     /// Per-step velocity override (0 = use global/curve)
@@ -44,7 +44,7 @@ pub const MAX_STEPS: usize = 32;
 
 /// A programmable rhythm pattern (step sequencer grid).
 /// Fixed-size array — no heap allocation during playback.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct RhythmPattern {
     pub steps: [StepData; MAX_STEPS],
     /// Number of active steps (1–32)

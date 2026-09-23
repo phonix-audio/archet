@@ -45,7 +45,7 @@ jobs:
       - name: No egui below the editor layer
         shell: bash
         run: |
-          for c in phonix-rt phonix-dsp phonix-music phonix-fx phonix-plugin phonix-session phonix-legacy; do
+          for c in phonix-rt phonix-dsp phonix-music phonix-fx phonix-plugin phonix-session phonix-legacy phonix-surface; do
             if cargo tree -e normal -p "$c" | grep -q ' egui '; then
               echo "$c depends on egui"; exit 1
             fi

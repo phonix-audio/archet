@@ -442,13 +442,17 @@ impl Arpeggiator {
 
     // ─── Setters (backward-compatible) ───
 
+    /// Setting what a setting already is changes nothing: a host resends
+    /// every parameter when one moves, and the pattern must not restart.
     pub fn set_enabled(&mut self, enabled: bool) {
+        if enabled == self.enabled { return; }
         self.enabled = enabled;
         if !enabled { self.reset(); }
     }
     pub fn is_enabled(&self) -> bool { self.enabled }
 
     pub fn set_pattern(&mut self, pattern: ArpPattern) {
+        if pattern == self.pattern { return; }
         self.pattern = pattern;
         self.step_index = 0;
         self.direction_up = true;
@@ -485,6 +489,7 @@ impl Arpeggiator {
     pub fn swing(&self) -> f32 { self.swing }
 
     pub fn set_latch(&mut self, v: bool) {
+        if v == self.latch { return; }
         self.latch = v;
         if !v { self.latched_notes.clear(); }
     }
@@ -501,13 +506,13 @@ impl Arpeggiator {
     pub fn is_rhythm_enabled(&self) -> bool { self.rhythm_enabled }
 
     pub fn set_rhythm_pattern(&mut self, p: RhythmPattern) {
+        if p == self.rhythm_pattern { return; }
         self.rhythm_pattern = p;
         self.rhythm_step = 0;
     }
 
     pub fn set_rhythm_preset(&mut self, index: usize) {
-        self.rhythm_pattern = RhythmPattern::preset(index);
-        self.rhythm_step = 0;
+        self.set_rhythm_pattern(RhythmPattern::preset(index));
     }
 
     pub fn set_scale_mode(&mut self, mode: ScaleMode) { self.scale.mode = mode; }
@@ -1257,4 +1262,25 @@ mod tests {
         let events = arp.process(100);
         assert!(events.iter().any(|e| e.is_on));
     }
+    /// Resending every setting as it is, as a host does when one moves,
+    /// leaves a running pattern where it was.
+    #[test]
+    fn resending_the_settings_keeps_the_pattern_running() {
+        let mut arp = Arpeggiator::new(48_000.0);
+        arp.set_enabled(true);
+        arp.set_tempo(120.0);
+        arp.set_pattern(ArpPattern::Up);
+        arp.set_rhythm_preset(2);
+        for n in [60u8, 64, 67] { arp.note_on(n); }
+        arp.fire_now();
+        for _ in 0..(48_000 / 512) * 2 { let _ = arp.process(100); }
+        let step = arp.step_index;
+        assert!(step > 0, "the pattern did not run");
+        arp.set_enabled(true);
+        arp.set_pattern(ArpPattern::Up);
+        arp.set_rhythm_preset(2);
+        arp.set_latch(false);
+        assert_eq!(arp.step_index, step, "a setting resent as it was restarted the pattern");
+    }
+
 }

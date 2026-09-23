@@ -199,25 +199,10 @@ impl<'a> Panel<'a> {
         let accent_color = header.map(|(_, c)| c);
         let pal = Palette::of(ui.ctx());
 
-        let frame_resp = egui::Frame::NONE
-            .fill(pal.bg_panel)
-            .corner_radius(4.0)
-            .inner_margin(12i8)
-            .stroke(Stroke::new(1.0_f32, pal.border))
-            .show(ui, |ui| {
-                ui.set_min_width(ui.available_width());
-                Self::show_content(ui, header, enabled, min_col_width, content, depth);
-            });
-
-        // Left accent stripe on framed panels
-        if let Some(color) = accent_color {
-            let r = frame_resp.response.rect;
-            ui.painter().rect_filled(
-                Rect::from_min_size(r.left_top(), Vec2::new(3.0, r.height())),
-                egui::CornerRadius { nw: 4, sw: 4, ne: 0, se: 0 },
-                color,
-            );
-        }
+        let _ = (pal, accent_color);
+        crate::theme::plated(ui, 4, 12, |ui| {
+            Self::show_content(ui, header, enabled, min_col_width, content, depth);
+        });
     }
 
     /// Render without border (child panels).
@@ -413,6 +398,22 @@ pub struct KnobMod<'a> {
     pub source_colors:   &'a [Color32],
 }
 
+/// How a knob reads: where its arc starts from, and what a double-click
+/// puts it back to.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct KnobLook {
+    /// The arc runs from the centre of the sweep, for a value about zero.
+    pub bipolar: bool,
+    /// The normalised value a double-click restores.
+    pub default: f32,
+}
+
+impl Default for KnobLook {
+    fn default() -> Self {
+        Self { bipolar: false, default: 0.5 }
+    }
+}
+
 fn draw_knob_body(
     ui: &mut Ui,
     value: &mut f32,
@@ -421,6 +422,20 @@ fn draw_knob_body(
     size: f32,
     accent: Color32,
     mod_overlay: Option<&KnobMod<'_>>,
+) -> (egui::Response, f32) {
+    draw_knob_look(ui, value, label, display_text, size, accent, mod_overlay, KnobLook::default())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_knob_look(
+    ui: &mut Ui,
+    value: &mut f32,
+    label: &str,
+    display_text: &str,
+    size: f32,
+    accent: Color32,
+    mod_overlay: Option<&KnobMod<'_>>,
+    look: KnobLook,
 ) -> (egui::Response, f32) {
     let s = size;
     let pal = Palette::of(ui.ctx());
@@ -439,7 +454,8 @@ fn draw_knob_body(
         ui.allocate_exact_size(Vec2::new(group_w, total_height), Sense::click_and_drag());
     let painter = ui.painter();
     let center = Pos2::new(rect.center().x, rect.top() + s / 2.0);
-    let radius = s / 2.0 - 4.0;
+    // The body, its ring and its scale all stay inside the knob's square.
+    let radius = s / 2.0 - 6.0;
 
     // The label is painted, not laid out, so this is what the accessibility
     // tree sees: a rotary is a slider to a screen reader.
@@ -447,71 +463,56 @@ fn draw_knob_body(
     let hovered = response.hovered() || response.dragged();
     let dragging = response.dragged();
 
-    // ERGO: 3-state knob — idle (subtle), hover (glow ring + value), active/drag (bright glow + value)
-    if hovered {
-        let glow_alpha = if dragging { 140u8 } else { 80 };
-        let glow_width = if dragging { 2.5_f32 } else { 1.5_f32 };
-        painter.circle_stroke(
-            center,
-            radius + 5.0,
-            Stroke::new(glow_width, Color32::from_rgba_unmultiplied(
-                accent.r(), accent.g(), accent.b(), glow_alpha,
-            )),
-        );
-    }
-
-    // Outer ring delimiter
-    painter.circle_stroke(center, radius + 3.0, Stroke::new(1.0_f32, pal.border));
-    painter.circle_filled(center, radius + 2.0, pal.bg_dark);
-
-    // Background circle
-    painter.circle_filled(center, radius, pal.bg_raised);
-    painter.circle_stroke(center, radius, Stroke::new(1.0_f32, pal.border));
-
-    // Inner circle (recessed look — darker center)
-    painter.circle_filled(center, radius - 3.0, pal.bg_dark);
-
-    // Arc indicator (270 degree sweep)
+    use crate::theme::{arc, lighten, radial_disc};
     let start_angle = std::f32::consts::PI * 0.75;
     let sweep = std::f32::consts::PI * 1.5;
-    let segments = 48;
-    let active_end = start_angle + sweep * *value;
+    let v = value.clamp(0.0, 1.0);
+    let active_end = start_angle + sweep * v;
+    let from = if look.bipolar { start_angle + sweep * 0.5 } else { start_angle };
+    let ring = radius + 1.5;
 
-    // Background arc (thicker track)
-    for i in 0..segments {
-        let t0 = i as f32 / segments as f32;
-        let t1 = (i + 1) as f32 / segments as f32;
-        let a0 = start_angle + sweep * t0;
-        let a1 = start_angle + sweep * t1;
-        let r = radius + 1.0;
-        let p0 = center + Vec2::new(a0.cos(), a0.sin()) * r;
-        let p1 = center + Vec2::new(a1.cos(), a1.sin()) * r;
-        painter.line_segment([p0, p1], Stroke::new(3.0_f32, pal.pointer_shadow));
+    // The scale printed round the knob.
+    if s >= 26.0 {
+        for k in 0..=10 {
+            let a = start_angle + sweep * k as f32 / 10.0;
+            let dir = Vec2::new(a.cos(), a.sin());
+            let long = k == 0 || k == 10 || (look.bipolar && k == 5);
+            let r0 = radius + 4.0;
+            let r1 = r0 + if long { 2.0 } else { 1.2 };
+            painter.line_segment([center + dir * r0, center + dir * r1], Stroke::new(1.0_f32, pal.silk_dim.gamma_multiply(if long { 0.9 } else { 0.55 })));
+        }
     }
 
-    // Active arc — accent color with glow on hover
-    for i in 0..segments {
-        let t0 = i as f32 / segments as f32;
-        let t1 = (i + 1) as f32 / segments as f32;
-        let a0 = start_angle + sweep * t0;
-        let a1 = start_angle + sweep * t1;
-        if a1 <= active_end {
-            let r = radius + 1.0;
-            let p0 = center + Vec2::new(a0.cos(), a0.sin()) * r;
-            let p1 = center + Vec2::new(a1.cos(), a1.sin()) * r;
-            // Thicker active arc + glow when hovered
-            let arc_width = if hovered { 3.5_f32 } else { 3.0_f32 };
-            painter.line_segment([p0, p1], Stroke::new(arc_width, accent));
-            // Soft glow behind active arc on hover
-            if hovered {
-                let glow_r = radius + 1.0;
-                let gp0 = center + Vec2::new(a0.cos(), a0.sin()) * glow_r;
-                let gp1 = center + Vec2::new(a1.cos(), a1.sin()) * glow_r;
-                painter.line_segment([gp0, gp1], Stroke::new(6.0_f32, Color32::from_rgba_unmultiplied(
-                    accent.r(), accent.g(), accent.b(), 30,
-                )));
-            }
-        }
+    // The track the value arc runs in, the glow under it, the arc.
+    arc(ui, center, ring, start_angle, start_angle + sweep, Stroke::new(3.0_f32, pal.pointer_shadow));
+    if hovered {
+        let glow = if dragging { 60 } else { 36 };
+        arc(ui, center, ring, from.min(active_end), from.max(active_end), Stroke::new(7.0_f32, Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), glow)));
+    }
+    arc(ui, center, ring, from.min(active_end), from.max(active_end), Stroke::new(if hovered { 3.2_f32 } else { 2.8_f32 }, accent));
+
+    // The knob itself: its shadow, a knurled skirt, a domed cap.
+    let skirt = radius - 1.5;
+    painter.circle_filled(center + Vec2::new(0.0, 1.8), skirt + 1.0, pal.shadow);
+    radial_disc(ui, center, skirt, center - Vec2::new(0.0, skirt * 0.6), lighten(pal.bg_raised, 0.16), pal.bg_dark);
+    let knurls = ((skirt * 1.2) as usize).clamp(12, 40);
+    for k in 0..knurls {
+        let a = k as f32 / knurls as f32 * std::f32::consts::TAU;
+        let dir = Vec2::new(a.cos(), a.sin());
+        let lit = (-dir.y).max(0.0);
+        painter.line_segment([center + dir * (skirt - 2.5), center + dir * (skirt - 0.5)], Stroke::new(1.0_f32, lerp_ink(pal.bg_dark, pal.light_edge, lit)));
+    }
+    painter.circle_stroke(center, skirt, Stroke::new(1.0_f32, pal.well_edge));
+    let cap = skirt * 0.72;
+    radial_disc(ui, center, cap, center - Vec2::new(cap * 0.2, cap * 0.5), lighten(pal.bg_raised, 0.3), pal.bg_panel);
+    painter.circle_stroke(center, cap, Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(0, 0, 0, 110)));
+    painter.line_segment(
+        [center + Vec2::new(-cap * 0.55, -cap * 0.8), center + Vec2::new(cap * 0.55, -cap * 0.8)],
+        Stroke::new(0.8_f32, pal.light_edge),
+    );
+    if look.bipolar {
+        let top = center + Vec2::new(0.0, -(radius + 3.5));
+        painter.circle_filled(top, 1.3, pal.silk_dim);
     }
 
     // ── Modulation overlay (if any) ────────────────────────────────────
@@ -556,37 +557,37 @@ fn draw_knob_body(
         }
     }
 
-    // Pointer line
-    let pointer_angle = start_angle + sweep * *value;
-    let pointer_start = center + Vec2::new(pointer_angle.cos(), pointer_angle.sin()) * (radius * 0.3);
-    let pointer_end = center + Vec2::new(pointer_angle.cos(), pointer_angle.sin()) * (radius - 5.0);
+    // The pointer: a line inlaid from the cap out to the skirt's edge.
+    let pointer_angle = start_angle + sweep * v;
+    let dir = Vec2::new(pointer_angle.cos(), pointer_angle.sin());
+    let pointer_start = center + dir * (cap * 0.35);
+    let pointer_end = center + dir * (skirt - 1.5);
     let pointer_color = if hovered { Color32::WHITE } else { pal.pointer };
+    painter.line_segment([pointer_start + Vec2::new(0.0, 1.0), pointer_end + Vec2::new(0.0, 1.0)], Stroke::new(2.2_f32, pal.pointer_shadow));
     painter.line_segment([pointer_start, pointer_end], Stroke::new(2.0_f32, pointer_color));
 
-    // Pointer dot at tip
-    let dot_pos = center + Vec2::new(pointer_angle.cos(), pointer_angle.sin()) * (radius - 5.0);
-    painter.circle_filled(dot_pos, if hovered { 2.5 } else { 2.0 }, pointer_color);
-
-    // ERGO: Value shown directly in knob center on hover (no tooltip required)
+    // The value, on a well laid over the cap while the hand is on it.
     if hovered {
-        // Show value in center of knob
-        let font_size = (s * 0.22).max(8.0).min(12.0);
-        painter.text(
-            center,
-            Align2::CENTER_CENTER,
-            display_text,
-            FontId::monospace(font_size),
-            pal.text_primary,
-        );
+        let font = FontId::monospace((s * 0.22).clamp(8.0, 12.0));
+        let galley = painter.layout_no_wrap(display_text.to_string(), font.clone(), pal.text_primary);
+        let back = Rect::from_center_size(center, galley.size() + Vec2::new(6.0, 2.0));
+        painter.rect_filled(back, 2.0, pal.well.gamma_multiply(0.85));
+        painter.text(center, Align2::CENTER_CENTER, display_text, font, pal.text_primary);
     }
 
-    // Label: 10px, TEXT_DIM, uppercase (doc/GUI.md § Typography)
-    painter.text(
-        Pos2::new(center.x, rect.top() + s + GAP_KNOB_LABEL),
-        Align2::CENTER_TOP,
+    // The label, in tracked capitals under the knob.
+    let font = FontId::proportional(pal.type_label);
+    let tracking = 0.6;
+    let w = crate::theme::tracked_width(ui, &label_up, font.clone(), tracking);
+    let ink = if hovered { pal.text_primary } else { pal.text_dim };
+    crate::theme::tracked_text(
+        ui,
+        Pos2::new(center.x - w * 0.5, rect.top() + s + GAP_KNOB_LABEL + pal.type_label * 0.6),
         &label_up,
-        FontId::proportional(10.0),
-        if hovered { pal.text_primary } else { pal.text_dim },
+        font,
+        ink,
+        tracking,
+        crate::theme::Relief::Printed,
     );
 
     // Handle drag — supports both vertical and horizontal movement.
@@ -616,12 +617,22 @@ fn draw_knob_body(
         }
     }
 
-    // ERGO: Double-click resets knob to center (50%)
     if response.double_clicked() {
-        *value = 0.5;
+        *value = look.default.clamp(0.0, 1.0);
     }
 
     (response, *value)
+}
+
+fn lerp_ink(a: Color32, b: Color32, t: f32) -> Color32 {
+    crate::theme::lerp_colour(a, b, t)
+}
+
+/// A knob that reads as `look` says: bipolar about its centre, and put back
+/// to its default by a double-click.
+#[allow(clippy::too_many_arguments)]
+pub fn knob_look(ui: &mut Ui, value: &mut f32, label: &str, display_text: &str, size: f32, accent: Color32, look: KnobLook) -> Response {
+    draw_knob_look(ui, value, label, display_text, size, accent, None, look).0
 }
 
 /// Draw a rotary knob with LED ring. Value shown on hover as tooltip.
@@ -769,7 +780,7 @@ pub fn knob_bipolar(
     let display = if old.abs() < 0.01 { "C".to_string() }
                   else if old > 0.0   { format!("R{:.0}", old * 100.0) }
                   else                { format!("L{:.0}", -old * 100.0) };
-    draw_knob_body(ui, &mut norm, label, &display, size, accent, None);
+    draw_knob_look(ui, &mut norm, label, &display, size, accent, None, KnobLook { bipolar: true, default: 0.5 });
     if (norm - old_norm).abs() > 1e-6 {
         *value = (norm * 2.0 - 1.0).clamp(-1.0, 1.0);
         true
@@ -832,19 +843,8 @@ pub fn drag_fixed(ui: &mut Ui, dv: DragValue<'_>, width: f32) -> Response {
 }
 
 pub fn section_header(ui: &mut Ui, label: &str, accent: Color32) {
-    // ERGO: Prominent section header — thick accent bar + larger text + tinted background
-    let response = ui.horizontal(|ui| {
-        let (bar_rect, _) = ui.allocate_exact_size(Vec2::new(4.0, 18.0), Sense::hover());
-        ui.painter().rect_filled(bar_rect, 2u8, accent);
-        ui.label(RichText::new(label.to_uppercase()).color(accent).strong().size(12.0));
-    });
-    // Subtle tinted background behind header row
-    let header_rect = response.response.rect;
-    ui.painter_at(Rect::from_min_max(header_rect.min, header_rect.max)).rect_filled(
-        header_rect.expand2(Vec2::new(4.0, 1.0)),
-        2.0,
-        Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), 12),
-    );
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 18.0), Sense::hover());
+    crate::theme::heading(ui, Pos2::new(rect.left(), rect.top() + 7.0), &label.to_uppercase(), accent, rect.right());
     ui.add_space(GAP_KNOB_LABEL + 2.0);
 }
 
@@ -857,33 +857,22 @@ pub fn section_header(ui: &mut Ui, label: &str, accent: Color32) {
 /// a vocoder's Male/Female, a bow/pluck switch, the organ footings), so the
 /// converted editors were the only ones with a blue square in an amber panel.
 pub fn selector_pill(ui: &mut Ui, label: &str, selected: bool, accent: Color32) -> egui::Response {
-    let fg = if selected { Color32::WHITE } else { Palette::of(ui.ctx()).text_dim };
-    let fill = if selected { accent } else { ui.visuals().widgets.inactive.bg_fill };
-    ui.add(
-        egui::Button::new(RichText::new(label).color(fg).size(11.0))
-            .fill(fill)
-            .corner_radius(3.0),
-    )
+    crate::controls::flow_button(ui, label, selected, accent)
 }
 
 /// Section header with accent bar and on/off toggle
 pub fn section_header_toggle(ui: &mut Ui, label: &str, accent: Color32, enabled: &mut bool) -> bool {
     let old = *enabled;
-    let active_accent = if *enabled { accent } else { Color32::from_rgb(60, 60, 60) };
-    let response = ui.horizontal(|ui| {
-        let (bar_rect, _) = ui.allocate_exact_size(Vec2::new(4.0, 18.0), Sense::hover());
-        ui.painter().rect_filled(bar_rect, 2u8, active_accent);
-        let dim = Palette::of(ui.ctx()).text_dim;
-        ui.checkbox(enabled, RichText::new(label.to_uppercase()).color(if *enabled { accent } else { dim }).strong().size(12.0));
-    });
-    if *enabled {
-        let header_rect = response.response.rect;
-        ui.painter_at(Rect::from_min_max(header_rect.min, header_rect.max)).rect_filled(
-            header_rect.expand2(Vec2::new(4.0, 1.0)),
-            2.0,
-            Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), 12),
-        );
+    let pal = Palette::of(ui.ctx());
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 18.0), Sense::click());
+    let up = label.to_uppercase();
+    resp.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, *enabled, up.clone()));
+    if resp.clicked() {
+        *enabled = !*enabled;
     }
+    crate::theme::lamp(ui, Pos2::new(rect.left() + 5.0, rect.top() + 7.0), 3.2, *enabled, accent);
+    let ink = if *enabled { accent } else { pal.silk_dim };
+    crate::theme::heading(ui, Pos2::new(rect.left() + 14.0, rect.top() + 7.0), &up, ink, rect.right());
     ui.add_space(GAP_KNOB_LABEL + 2.0);
     *enabled != old
 }
@@ -919,17 +908,7 @@ pub fn panel_frame<R>(
     ui: &mut Ui,
     add: impl FnOnce(&mut Ui) -> R,
 ) -> R {
-    let pal = Palette::of(ui.ctx());
-    egui::Frame::NONE
-        .fill(pal.bg_panel)
-        .corner_radius(4.0)
-        .inner_margin(10i8)
-        .stroke(Stroke::new(1.0_f32, pal.border))
-        .show(ui, |ui| {
-            ui.set_min_width(ui.available_width());
-            add(ui)
-        })
-        .inner
+    crate::theme::plated(ui, 4, 10, add)
 }
 
 /// Shared house-style tab strip: draws `labels` as a horizontal row of tab
@@ -939,28 +918,10 @@ pub fn panel_frame<R>(
 /// same way and dense editors never need to scroll.
 pub fn tab_bar(ui: &mut Ui, selected: usize, labels: &[&str], accent: Color32) -> Option<usize> {
     let mut clicked = None;
-    let dim = Palette::of(ui.ctx()).text_dim;
     ui.horizontal(|ui| {
         ui.add_space(8.0);
-        for (i, label) in labels.iter().enumerate() {
-            let is_sel = i == selected;
-            // Same weight for all tabs (selection shown by colour + the underline
-            // below); bolding only the selected one made it wider and shifted the
-            // tabs after it.
-            let text = RichText::new(*label).size(11.0)
-                .color(if is_sel { accent } else { dim });
-            let resp = ui.button(text);
-            if resp.clicked() { clicked = Some(i); }
-            // Selected-tab underline in the accent, for a proper tab feel.
-            if is_sel {
-                let r = resp.rect;
-                ui.painter().hline(
-                    r.left()..=r.right(),
-                    r.bottom() + 1.0,
-                    Stroke::new(2.0_f32, accent),
-                );
-            }
-            ui.add_space(4.0);
+        if let Some(i) = crate::controls::flow_switch(ui, labels, selected, accent, ("tab_bar", labels.len())) {
+            clicked = Some(i);
         }
     });
     clicked
@@ -970,69 +931,14 @@ pub fn tab_bar(ui: &mut Ui, selected: usize, labels: &[&str], accent: Color32) -
 /// ERGO: Segmented LED VU meter with glow on peak segments for clear level feedback
 pub fn vu_meter(ui: &mut Ui, level: f32, width: f32, height: f32, _stereo: bool) {
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
-    let painter = ui.painter();
-
-    let pal = Palette::of(ui.ctx());
-    painter.rect_filled(rect, 2u8, pal.bg_dark);
-    painter.rect_stroke(rect, 2.0, Stroke::new(0.5_f32, pal.border), egui::StrokeKind::Outside);
-
-    let segments = 12;
-    let segment_height = (rect.height() - 4.0) / segments as f32;
-    let active_segments = (level * segments as f32).round() as i32;
-
-    for i in 0..segments {
-        let y = rect.bottom() - 2.0 - (i + 1) as f32 * segment_height;
-        let segment_rect = Rect::from_min_size(
-            Pos2::new(rect.left() + 2.0, y),
-            Vec2::new(rect.width() - 4.0, segment_height - 1.0),
-        );
-
-        if i < active_segments {
-            let color = if i < 4 { pal.ok } else if i < 8 { pal.warn } else { pal.warm };
-            painter.rect_filled(segment_rect, 1u8, color);
-            // Glow on the peak segment
-            if i == active_segments - 1 {
-                painter.rect_filled(
-                    segment_rect.expand(1.0),
-                    2.0,
-                    Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 40),
-                );
-                painter.rect_filled(segment_rect, 1u8, color);
-            }
-        } else {
-            // Dim inactive segments with slight visibility
-            painter.rect_filled(segment_rect, 1u8, Color32::from_rgb(28, 28, 32));
-        }
-    }
+    crate::controls::ladder(ui, rect, level, height >= width);
 }
 
 /// Draw a simple LED indicator
 /// ERGO: LED uses two visual states — on (color + glow) and off (dark) for clear status feedback
 pub fn led(ui: &mut Ui, on: bool, color: Color32, size: f32) {
     let (rect, _) = ui.allocate_exact_size(Vec2::splat(size), Sense::hover());
-    let painter = ui.painter();
-    let center = rect.center();
-    let radius = size / 2.0;
-
-    if on {
-        painter.circle_filled(
-            center,
-            radius + 2.0,
-            Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 40),
-        );
-    }
-
-    painter.circle_filled(
-        center,
-        radius,
-        if on { color } else { Color32::from_rgb(35, 35, 35) },
-    );
-
-    painter.circle_filled(
-        Pos2::new(center.x - radius * 0.25, center.y - radius * 0.25),
-        radius * 0.25,
-        Color32::from_rgba_unmultiplied(255, 255, 255, if on { 80 } else { 20 }),
-    );
+    crate::theme::lamp(ui, rect.center(), size * 0.5 - 1.0, on, color);
 }
 
 /// Draw a horizontal slider (doc/GUI.md § Slider)
@@ -1056,39 +962,17 @@ pub fn vintage_slider(
         let hovered = response.hovered() || response.dragged();
         let dragging = response.dragged();
 
-        // Track: thicker on hover
-        let track_h = if hovered { 5.0 } else { 4.0 };
-        let track_rect = Rect::from_center_size(rect.center(), Vec2::new(rect.width(), track_h));
-        painter.rect_filled(track_rect, 2u8, pal.bg_dark);
-        painter.rect_stroke(track_rect, 2u8, Stroke::new(0.5_f32, Color32::from_rgb(20, 20, 22)), egui::StrokeKind::Outside);
-
-        // Filled portion
-        let normalized = (*value - min) / (max - min);
+        // The slot, the lit run of it, and the cap.
+        let track_rect = Rect::from_center_size(rect.center(), Vec2::new(rect.width(), 6.0));
+        crate::theme::recess(ui, track_rect, 3.0);
+        let normalized = ((*value - min) / (max - min)).clamp(0.0, 1.0);
         let filled_width = rect.width() * normalized;
-        let filled_rect = Rect::from_min_size(track_rect.min, Vec2::new(filled_width, track_h));
-        let fill_alpha = if dragging { 180u8 } else if hovered { 140 } else { 102 };
-        let fill_color = Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), fill_alpha);
-        painter.rect_filled(filled_rect, 2u8, fill_color);
-
-        // Glow behind filled portion on hover
-        if hovered {
-            painter.rect_filled(
-                filled_rect.expand(1.5),
-                3.0,
-                Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), 20),
-            );
-            painter.rect_filled(filled_rect, 2u8, fill_color);
-        }
-
-        // Thumb
+        let filled_rect = Rect::from_min_size(track_rect.min, Vec2::new(filled_width, track_rect.height())).shrink(1.5);
+        let lit = if dragging { 1.0 } else if hovered { 0.85 } else { 0.7 };
+        crate::theme::gradient_rounded(ui, filled_rect, 2, accent.gamma_multiply(lit), accent.gamma_multiply(lit * 0.6));
         let handle_x = rect.left() + filled_width;
-        let thumb_center = Pos2::new(handle_x, rect.center().y);
-        let thumb_r = if dragging { 7.5 } else if hovered { 7.0 } else { 6.0 };
-        painter.circle_filled(thumb_center, thumb_r, if hovered { Color32::WHITE } else { pal.bg_raised });
-        painter.circle_stroke(thumb_center, thumb_r, Stroke::new(
-            if hovered { 1.5_f32 } else { 1.0_f32 },
-            accent,
-        ));
+        let cap = Rect::from_center_size(Pos2::new(handle_x, rect.center().y), Vec2::new(10.0, 16.0));
+        crate::controls::cap(ui, cap, accent, true);
 
         // Value text
         let value_text = format!("{:.2}", *value);
@@ -1096,7 +980,7 @@ pub fn vintage_slider(
             Pos2::new(rect.right() + 4.0, rect.center().y),
             Align2::LEFT_CENTER,
             value_text,
-            FontId::monospace(12.0),
+            FontId::monospace(pal.type_value),
             if hovered { pal.text_primary } else { pal.text_dim },
         );
 
@@ -1128,39 +1012,17 @@ pub fn vintage_slider(
 /// as the fill width fraction. Above 0.9 the fill turns red — the
 /// universal convention every plugin already used.
 pub fn peak_meter(ui: &mut Ui, peak: f32, size: Vec2, accent: Color32) {
+    let _ = accent;
     let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
-    let bg = Color32::from_rgb(30, 30, 35);
-    ui.painter().rect_filled(rect, 2u8, bg);
-    let fill_w = peak.clamp(0.0, 1.0) * size.x;
-    let fill_rect = Rect::from_min_size(rect.min, Vec2::new(fill_w, size.y));
-    let fill_colour = if peak > 0.9 { Color32::RED } else { accent };
-    ui.painter().rect_filled(fill_rect, 2u8, fill_colour);
+    crate::controls::ladder(ui, rect, peak, false);
 }
 
-/// Vertical peak meter — fills from the bottom up. Used in mixer
-/// strips alongside the volume fader so the strip has a real
-/// channel-meter look. `peak` is clamped to 0..1; above 0.9 the fill
-/// turns red. Includes a faint 0 dB tick at the 0.79 mark (≈ -1 dB
-/// from clip) to anchor the eye.
+/// Vertical peak meter, an LED ladder filling from the bottom up, for a
+/// mixer strip beside its fader.
 pub fn peak_meter_vertical(ui: &mut Ui, peak: f32, size: Vec2, accent: Color32) {
+    let _ = accent;
     let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
-    let p = ui.painter();
-    p.rect_filled(rect, 2u8, Color32::from_rgb(22, 22, 26));
-    let fill_h = peak.clamp(0.0, 1.0) * size.y;
-    if fill_h > 0.0 {
-        let fill_rect = Rect::from_min_max(
-            Pos2::new(rect.min.x, rect.max.y - fill_h),
-            rect.max,
-        );
-        let fill_colour = if peak > 0.9 { Color32::RED } else { accent };
-        p.rect_filled(fill_rect, 2u8, fill_colour);
-    }
-    // 0 dB tick at ~0.79 (≈ -1 dB headroom marker)
-    let tick_y = rect.max.y - size.y * 0.79;
-    p.line_segment(
-        [Pos2::new(rect.min.x, tick_y), Pos2::new(rect.max.x, tick_y)],
-        Stroke::new(0.6_f32, Color32::from_rgba_unmultiplied(255, 255, 255, 60)),
-    );
+    crate::controls::ladder(ui, rect, peak, true);
 }
 
 
@@ -1317,7 +1179,8 @@ const STICKY_SLOT: &str = "phonix_sticky_menu_open";
 /// for the menu to close, e.g. after an entry has been chosen.
 pub fn sticky_menu_button(ui: &mut Ui, label: &str, content: impl FnOnce(&mut Ui) -> bool) {
     use egui::Id;
-    let resp = ui.button(label);
+    let tint = Palette::of(ui.ctx()).accent;
+    let resp = crate::controls::flow_button(ui, label, false, tint);
     let ctx = ui.ctx().clone();
     let slot = Id::new(STICKY_SLOT);
     let key = slot.with(resp.id).with(label);

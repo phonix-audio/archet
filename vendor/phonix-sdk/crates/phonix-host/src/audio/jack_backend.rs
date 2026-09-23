@@ -90,13 +90,14 @@ impl LoadMeter {
 /// Spawn a background thread that samples `SharedStats` every second and
 /// emits the log line we used to emit from the audio thread. This is where
 /// the `write(2)` to stderr happens — on a normal thread, not the JACK
-/// data-loop. Handle joins on drop via the `stop` flag.
+/// data-loop. Handle joins on drop via the `stop` flag. `None` when the
+/// system refuses the thread: the stream runs without its load log.
 fn spawn_stats_logger(
     stats: Arc<SharedStats>,
     sample_rate: u32,
     buffer_frames: u32,
     tag: &'static str,
-) -> std::thread::JoinHandle<()> {
+) -> Option<std::thread::JoinHandle<()>> {
     let budget_ns: u64 =
         (buffer_frames as u64 * 1_000_000_000) / sample_rate.max(1) as u64;
     let budget_ns = budget_ns.max(1);
@@ -166,7 +167,8 @@ fn spawn_stats_logger(
                 }
             }
         })
-        .expect("spawn audio stats logger")
+        .map_err(|e| log::warn!("JACK [{tag}]: the load log's thread was refused ({e}); the stream runs without it"))
+        .ok()
 }
 
 /// RAII wrapper: holds the live JACK client and the logger thread, joins
@@ -474,7 +476,7 @@ where
     let bundle = JackStreamBundle {
         _client: active,
         stats,
-        logger: Some(logger),
+        logger,
     };
     Ok((AudioStream::new(bundle), cfg))
 }
@@ -551,7 +553,7 @@ where
     let bundle = JackStreamBundle {
         _client: active,
         stats,
-        logger: Some(logger),
+        logger,
     };
     Ok((AudioStream::new(bundle), cfg))
 }

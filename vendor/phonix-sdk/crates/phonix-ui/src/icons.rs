@@ -207,29 +207,36 @@ pub fn icon_btn(
     size: f32,
     tint: Color32,
 ) -> Response {
-    let img = egui::Image::from_bytes(uri, svg)
-        .fit_to_exact_size(Vec2::splat(size))
-        .tint(tint);
-    ui.add(egui::Button::image(img))
+    faced(ui, svg, uri, Vec2::splat(size + 10.0), size, tint)
+}
+
+/// A raised face with an icon set on it, lit in the tint while the hand
+/// is on it, pressed while held.
+fn faced(ui: &mut Ui, svg: &'static [u8], uri: &'static str, outer: Vec2, icon: f32, tint: Color32) -> Response {
+    let (rect, resp) = ui.allocate_exact_size(outer, egui::Sense::click());
+    let down = resp.is_pointer_button_down_on();
+    crate::controls::face(ui, rect, false, down, resp.hovered(), tint);
+    let at = rect.center() + if down { Vec2::new(0.0, 1.0) } else { Vec2::ZERO };
+    let ink = if resp.hovered() { crate::theme::lighten(tint, 0.3) } else { tint };
+    egui::Image::from_bytes(uri, svg)
+        .tint(ink)
+        .paint_at(ui, egui::Rect::from_center_size(at, Vec2::splat(icon)));
+    resp
 }
 
 /// Transport-sized icon button (28×28 outer, 16px icon).
 pub fn transport_btn(ui: &mut Ui, svg: &'static [u8], uri: &'static str, tint: Color32) -> Response {
-    let img = egui::Image::from_bytes(uri, svg)
-        .fit_to_exact_size(Vec2::splat(16.0))
-        .tint(tint);
-    ui.add(
-        egui::Button::image(img)
-            .frame(true),
-    )
+    faced(ui, svg, uri, Vec2::new(30.0, 24.0), 14.0, tint)
 }
 
 /// Compact icon button (no frame, 12px icon — for row controls etc.).
 pub fn small_icon_btn(ui: &mut Ui, svg: &'static [u8], uri: &'static str, tint: Color32) -> Response {
-    let img = egui::Image::from_bytes(uri, svg)
-        .fit_to_exact_size(Vec2::splat(12.0))
-        .tint(tint);
-    ui.add(egui::Button::image(img).frame(false))
+    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(16.0), egui::Sense::click());
+    let ink = if resp.hovered() { crate::theme::lighten(tint, 0.4) } else { tint };
+    egui::Image::from_bytes(uri, svg)
+        .tint(ink)
+        .paint_at(ui, egui::Rect::from_center_size(rect.center(), Vec2::splat(12.0)));
+    resp
 }
 
 /// Draw an inline decorative icon (no interaction, no frame) at a given size.
