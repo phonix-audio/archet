@@ -36,6 +36,7 @@ pub mod path_lfo;
 pub mod synth_params;
 pub mod spectral_resynth;
 pub mod pitch;
+pub mod fader;
 pub mod reverb;
 pub mod chorus;
 pub mod meters;

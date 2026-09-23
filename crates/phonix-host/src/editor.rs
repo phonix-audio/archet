@@ -345,20 +345,20 @@ mod tests {
     /// platform type, attach a window id — against a plugin rather than
     /// against the documentation.
     #[test]
-    #[ignore = "needs the Marteau bundle installed and an X11 display"]
+    #[ignore = "needs the Phonix Piano bundle installed and an X11 display"]
     fn the_plugin_editor_attaches_to_a_window_of_ours() {
         if !x11_available() {
             eprintln!("no X11 display; skipping");
             return;
         }
-        let Some(path) = crate::vst3::find_by_name("Cordis") else {
-            eprintln!("Cordis is not installed; skipping");
+        let Some(path) = crate::vst3::find_by_name("Phonix Piano") else {
+            eprintln!("Phonix Piano is not installed; skipping");
             return;
         };
         let plugin = crate::vst3::Vst3Plugin::load(&path, 48_000.0, 512).expect("load");
         let conn = plugin.editor_conn().expect("the plugin publishes no controller");
 
-        let win = Vst3EditorWindow::open(conn, "Cordis (test)", APP_ID)
+        let win = Vst3EditorWindow::open(conn, "Phonix Piano (test)", APP_ID)
             .expect("the editor refused to attach");
         // Dropping detaches the view and destroys the window; a crash here is
         // the failure this test exists to catch.
@@ -446,13 +446,13 @@ mod tests {
             eprintln!("no X11 display; skipping");
             return;
         }
-        let Some(path) = crate::vst3::find_by_name("Cordis") else {
-            eprintln!("Cordis is not installed; skipping");
+        let Some(path) = crate::vst3::find_by_name("Phonix Piano") else {
+            eprintln!("Phonix Piano is not installed; skipping");
             return;
         };
         let plugin = crate::vst3::Vst3Plugin::load(&path, 48_000.0, 512).expect("load");
         let conn = plugin.editor_conn().expect("no controller");
-        let mut win = Vst3EditorWindow::open(conn, "Cordis", APP_ID).expect("attach");
+        let mut win = Vst3EditorWindow::open(conn, "Phonix Piano", APP_ID).expect("attach");
         for _ in 0..60 {
             if win.poll() == EditorEvent::Closed {
                 break;

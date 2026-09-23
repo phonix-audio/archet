@@ -22,7 +22,7 @@
 // `phonix-preset` crate; re-exported here so `preset_picker::{Preset,
 // NamedPreset}` keeps resolving for every caller of the widget.
 pub use phonix_plugin::preset::{NamedPreset, Preset};
-use egui::{RichText, Ui};
+use egui::{Align2, FontId, Pos2, Rect, RichText, Sense, Ui, Vec2};
 
 /// Minimum number of distinct categories before the picker switches
 /// from inline `"CATEGORY · name"` rows to a section-header combo
@@ -136,6 +136,7 @@ pub fn picker_ui<P: Preset>(
     let mut newly_selected: Option<usize> = None;
 
     ui.horizontal(|ui| {
+        let pal = crate::theme::Palette::of(ui.ctx());
         let cur_label = presets.get(state.current_idx)
             .map(|p| p.preset_name())
             .unwrap_or("(none)");
@@ -143,58 +144,83 @@ pub fn picker_ui<P: Preset>(
             .and_then(|p| p.preset_category());
 
         if grouped {
-            // Fixed-width category chip: the category NAME changes width as the
-            // user navigates presets (and vanishes for a None-category one), which
-            // would shove the combo + arrows + preset counter that follow. Reserve
-            // its slot so nothing after it moves. (Shared picker → fixes it for
-            // every plugin + the FX rack headers at once.)
-            crate::widgets::fixed_label(ui, 66.0,
-                RichText::new(cur_cat.unwrap_or("")).color(style.dim).size(10.0).strong());
+            // A fixed slot, so a category's name changing width as the
+            // presets are stepped through moves nothing after it.
+            let (chip, _) = ui.allocate_exact_size(Vec2::new(66.0, 22.0), Sense::hover());
+            let text = cur_cat.unwrap_or("").to_uppercase();
+            let clipped = ui.painter().with_clip_rect(chip);
+            clipped.text(Pos2::new(chip.right() - 4.0, chip.center().y), Align2::RIGHT_CENTER, text,
+                FontId::proportional(pal.type_caption), style.dim);
         }
 
-        // Fixed width either way, so hiding the name moves nothing after it.
-        let combo_label = if style.name_in_combo { cur_label } else { "Presets" };
-        egui::ComboBox::from_id_salt(style.salt)
-            .selected_text(RichText::new(combo_label).color(style.accent))
-            .width(COMBO_WIDTH_PX)
-            .show_ui(ui, |ui| {
+        // The nameplate: a well with a step either side, the name in it,
+        // and a click on the name opens the list.
+        let (plate, _) = ui.allocate_exact_size(Vec2::new(COMBO_WIDTH_PX + 32.0, 22.0), Sense::hover());
+        crate::theme::recess(ui, plate, 3.0);
+        let step = 16.0;
+        let left = Rect::from_min_size(plate.min, Vec2::new(step, plate.height()));
+        let right = Rect::from_min_size(Pos2::new(plate.right() - step, plate.top()), Vec2::new(step, plate.height()));
+        let body = Rect::from_min_max(Pos2::new(left.right(), plate.top()), Pos2::new(right.left(), plate.bottom()));
+        let id = ui.id().with(style.salt);
+        let rl = ui.interact(left, id.with("prev"), Sense::click()).on_hover_text("Previous preset");
+        let rr = ui.interact(right, id.with("next"), Sense::click()).on_hover_text("Next preset");
+        let rb = ui.interact(body, id.with("list"), Sense::click());
+        rl.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "PREVIOUS PRESET"));
+        rr.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "NEXT PRESET"));
+        rb.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, "PRESETS"));
+        crate::controls::chevron(ui, left.center(), -1.0, if rl.hovered() { pal.silk } else { pal.silk_dim });
+        crate::controls::chevron(ui, right.center(), 1.0, if rr.hovered() { pal.silk } else { pal.silk_dim });
+        for x in [left.right(), right.left()] {
+            ui.painter().line_segment([Pos2::new(x, plate.top() + 4.0), Pos2::new(x, plate.bottom() - 4.0)], egui::Stroke::new(1.0_f32, pal.well_edge));
+        }
+        let shown = if style.name_in_combo { cur_label } else { "Presets" };
+        let ink = if rb.hovered() { crate::theme::lighten(style.accent, 0.25) } else { style.accent };
+        ui.painter().with_clip_rect(body.shrink2(Vec2::new(6.0, 0.0))).text(
+            Pos2::new(body.left() + 8.0, body.center().y), Align2::LEFT_CENTER, shown,
+            FontId::proportional(pal.type_value + 1.0), ink);
+        let tri = Pos2::new(body.right() - 9.0, body.center().y);
+        ui.painter().add(egui::Shape::convex_polygon(
+            vec![tri + Vec2::new(-3.5, -1.5), tri + Vec2::new(3.5, -1.5), tri + Vec2::new(0.0, 2.5)],
+            pal.silk_dim, egui::Stroke::NONE));
+
+        egui::Popup::menu(&rb).show(|ui| {
+            ui.set_min_width(body.width());
+            egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
                 let mut last_cat: Option<&str> = None;
                 for &orig_idx in &render_order {
                     let p = &presets[orig_idx];
                     let cat = p.preset_category();
                     if grouped && cat != last_cat {
-                        // First entry: no separator above; subsequent
-                        // category changes get a separator + chip.
                         if last_cat.is_some() { ui.separator(); }
                         if let Some(c) = cat {
-                            ui.label(RichText::new(c).color(style.dim).size(10.0));
+                            ui.label(RichText::new(c.to_uppercase()).color(style.dim).size(pal.type_caption));
                         }
                         last_cat = cat;
                     }
                     let is_sel = orig_idx == state.current_idx;
-                    let label = p.preset_name().to_string();
+                    let label = RichText::new(p.preset_name()).color(if is_sel { style.accent } else { pal.silk });
                     if ui.selectable_label(is_sel, label).clicked() {
                         newly_selected = Some(orig_idx);
+                        ui.close();
                     }
                 }
             });
+        });
 
-        // Prev / next — walk render order so the user sees the same
-        // sequence the dropdown displays. Wraps at the ends.
-        if ui.small_button("<").on_hover_text("Previous preset").clicked() {
+        if rl.clicked() {
             let n = render_order.len();
             let next_pos = if cur_render_pos == 0 { n - 1 } else { cur_render_pos - 1 };
             newly_selected = Some(render_order[next_pos]);
         }
-        if ui.small_button(">").on_hover_text("Next preset").clicked() {
+        if rr.clicked() {
             let next_pos = (cur_render_pos + 1) % render_order.len();
             newly_selected = Some(render_order[next_pos]);
         }
 
-        // Counter follows render position so "12 / 64" matches what
-        // the user sees when scrolling the dropdown.
+        // The counter follows the list's order, so "12 / 64" matches it.
         let counter = format!("{} / {}", cur_render_pos + 1, presets.len());
-        ui.label(RichText::new(counter).color(style.dim).size(9.0));
+        let (c, _) = ui.allocate_exact_size(Vec2::new(40.0, 22.0), Sense::hover());
+        ui.painter().text(c.left_center(), Align2::LEFT_CENTER, counter, FontId::monospace(pal.type_caption), style.dim);
     });
 
     if let Some(i) = newly_selected {

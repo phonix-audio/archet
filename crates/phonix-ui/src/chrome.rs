@@ -1,11 +1,11 @@
 //! The plugin window's header, and the side channel a standalone host uses
 //! to show its device and take a restart request from it.
 
-use egui::{Align, Color32, Layout, RichText, Ui, Vec2};
+use egui::{Align, Align2, Color32, FontId, Layout, Pos2, RichText, Sense, Ui, Vec2};
 
+use crate::controls;
 use crate::preset_picker;
-use crate::theme::Palette;
-use crate::widgets::peak_meter;
+use crate::theme::{self, Palette};
 
 /// What the GUI is asking the host to do.
 ///
@@ -107,7 +107,10 @@ pub struct ButtonEntry<'a> {
 #[derive(Default)]
 pub struct PluginChrome<'a> {
     pub title:        &'a str,
-    /// What the instrument is, in a few words, printed beside the name.
+    /// What the instrument is, printed beside the name. One to three words,
+    /// taken from the first line of the instrument's README. Written from the
+    /// panel instead, the label names whatever part is largest on screen and
+    /// drifts away from what the instrument was specified to be.
     pub subtitle:     Option<&'a str>,
     pub accent:       Color32,
     pub dim:          Color32,
@@ -176,101 +179,99 @@ pub fn plugin_chrome<P: preset_picker::Preset>(
 
     ui.horizontal(|ui| {
         ui.set_min_height(CHROME_ROW_H);
-        // Title — uses a fixed-size label rather than ui.heading() so
-        // the row keeps a predictable baseline / height.
-        ui.label(RichText::new(chrome.title)
-            .color(chrome.accent).strong().size(CHROME_TITLE_PT));
+        let pal = Palette::of(ui.ctx());
+        // The name, in tracked capitals of the display face.
+        let title_font = theme::display_font(ui.ctx(), CHROME_TITLE_PT);
+        let tw = theme::tracked_width(ui, chrome.title, title_font.clone(), 1.8);
+        let (tr, _) = ui.allocate_exact_size(Vec2::new(tw, CHROME_ROW_H), Sense::hover());
+        theme::tracked_text(ui, tr.left_center(), chrome.title, title_font, chrome.accent, 1.8, theme::Relief::Embossed);
         if let Some(s) = chrome.subtitle {
-            ui.add_space(CHROME_GAP / 2.0);
-            ui.label(RichText::new(s).color(chrome.dim).size(CHROME_PILL_PT));
+            ui.add_space(CHROME_GAP * 0.75);
+            let font = FontId::proportional(pal.type_silk);
+            let sw = theme::tracked_width(ui, &s.to_uppercase(), font.clone(), 0.8);
+            let (sr, _) = ui.allocate_exact_size(Vec2::new(sw, CHROME_ROW_H), Sense::hover());
+            theme::tracked_text(ui, sr.left_center(), &s.to_uppercase(), font, chrome.dim, 0.8, theme::Relief::Printed);
         }
         ui.add_space(CHROME_GAP);
 
-        // The patch's own name, where the picker that matches it is.
+        // The patch's own name, in a well of its own.
         if let Some(name) = chrome.patch_name {
+            let (well, _) = ui.allocate_exact_size(Vec2::new(PATCH_NAME_W, 22.0), Sense::hover());
+            theme::recess(ui, well, 3.0);
             let mut edited = name.to_string();
-            if ui.add(egui::TextEdit::singleline(&mut edited)
-                .desired_width(PATCH_NAME_W)
-                .font(egui::TextStyle::Small)
-                .text_color(chrome.accent))
-                .changed()
-            {
+            let field = egui::TextEdit::singleline(&mut edited)
+                .frame(egui::Frame::NONE)
+                .font(FontId::proportional(pal.type_value + 1.0))
+                .text_color(chrome.accent)
+                .desired_width(PATCH_NAME_W - 12.0);
+            if ui.put(well.shrink2(Vec2::new(6.0, 3.0)), field).changed() {
                 renamed = Some(edited);
             }
             ui.add_space(CHROME_GAP);
         }
 
-        // Preset picker — fixed 200 px wide widget that handles its
-        // own internal layout. Identity-only style.
         let style = preset_picker::PresetPickerStyle {
             salt: chrome.preset_salt, accent: chrome.accent, dim: chrome.dim,
-            // The name field above already carries it; a combo repeating it is
-            // the duplication this header exists to remove.
+            // The name field above already carries it; a list repeating it
+            // beside that field is the same name printed twice.
             name_in_combo: chrome.patch_name.is_none(),
         };
         preset_selected = preset_picker::picker_ui(ui, &style, preset_state, presets);
 
-        // Disk save/load, next to the factory-preset picker.
+        // Disk save and load, next to the factory presets.
         ui.add_space(CHROME_GAP);
-        if ui.small_button(RichText::new("Save").color(chrome.dim).size(CHROME_PILL_PT)).clicked() {
+        if controls::flow_button(ui, "SAVE", false, chrome.accent).clicked() {
             save_clicked = true;
         }
-        if ui.small_button(RichText::new("Load").color(chrome.dim).size(CHROME_PILL_PT)).clicked() {
+        if controls::flow_button(ui, "LOAD", false, chrome.accent).clicked() {
             load_clicked = true;
         }
 
-        // The plugin's own switches, then the pages it can show. The order is
-        // the same in every plugin: what the patch is, then what to do with
-        // it, then which page of it to look at.
+        // The plugin's own switches, then the pages it can show: what the
+        // patch is, then what to do with it, then which page to look at.
         if !chrome.buttons.is_empty() { ui.add_space(CHROME_GAP); }
         for (i, b) in chrome.buttons.iter().enumerate() {
-            let col = if b.on { chrome.accent } else { chrome.dim };
-            let text = RichText::new(b.label).color(col).strong().size(CHROME_PILL_PT);
-            if ui.selectable_label(b.on, text).clicked() {
+            if controls::flow_button(ui, b.label, b.on, chrome.accent).clicked() {
                 button_clicked = Some(i);
             }
         }
 
-        if !chrome.mode_pills.is_empty() { ui.add_space(CHROME_GAP); }
-        for (i, pill) in chrome.mode_pills.iter().enumerate() {
-            let col = if pill.selected { chrome.accent } else { chrome.dim };
-            let text = RichText::new(pill.label).color(col).strong().size(CHROME_PILL_PT);
-            if ui.selectable_label(pill.selected, text).clicked() {
+        if !chrome.mode_pills.is_empty() {
+            ui.add_space(CHROME_GAP);
+            let labels: Vec<&str> = chrome.mode_pills.iter().map(|p| p.label).collect();
+            let sel = chrome.mode_pills.iter().position(|p| p.selected).unwrap_or(usize::MAX);
+            if let Some(i) = controls::flow_switch(ui, &labels, sel, chrome.accent, (chrome.preset_salt, "pills")) {
                 pill_clicked = Some(i);
             }
         }
 
-        // Right-aligned tail: status text (if any) then meter.
-        // Guaranteed gap from the picker is enforced by the RTL block
-        // starting only after `add_space` — picker ↔ tail can't collide.
+        // The right-hand tail: the level, the load, what the host says.
         ui.add_space(CHROME_GAP);
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            peak_meter(ui, chrome.peak, Vec2::new(60.0, 8.0), chrome.accent);
-            // Fixed-width CPU readout, uniform across every plugin. `{:>3.0}` +
-            // monospace keeps `CPU   5%` and `CPU 100%` the SAME width, so the
-            // value never shifts the header.
+            let (m, _) = ui.allocate_exact_size(Vec2::new(64.0, 9.0), Sense::hover());
+            controls::ladder(ui, m, chrome.peak, false);
+            // Fixed width, so the value never shifts the header.
             if let Some(cpu) = chrome.cpu {
                 ui.add_space(8.0);
                 let pct = (cpu * 100.0).clamp(0.0, 999.0);
-                let col = if cpu > 0.85 { Color32::from_rgb(255, 70, 50) }
-                    else if cpu > 0.6 { Color32::from_rgb(230, 180, 60) }
-                    else { Color32::from_rgb(120, 190, 120) };
-                ui.label(RichText::new(format!("CPU {pct:>3.0}%"))
-                    .monospace().size(CHROME_STATUS_PT).color(col));
+                let col = if cpu > 0.85 { pal.warm } else if cpu > 0.6 { pal.warn } else { pal.ok };
+                let (r, _) = ui.allocate_exact_size(Vec2::new(64.0, CHROME_ROW_H), Sense::hover());
+                theme::lamp(ui, Pos2::new(r.left() + 4.0, r.center().y), 2.6, true, col);
+                ui.painter().text(Pos2::new(r.right(), r.center().y), Align2::RIGHT_CENTER,
+                    format!("CPU {pct:>3.0}%"), FontId::monospace(CHROME_STATUS_PT), pal.silk_dim);
             }
             if let Some(s) = chrome.status_right {
                 ui.add_space(8.0);
                 ui.label(RichText::new(s).color(chrome.dim).size(CHROME_STATUS_PT));
             }
             // Device control, only where a host published its status. In the
-            // DAW nothing does, because there the host owns the device and
-            // reopening it from a plugin window would be wrong.
+            // DAW nothing does: there the host owns the device.
             if let Some(st) = status(ui.ctx()) {
                 ui.add_space(8.0);
                 let (txt, col) = match (&st.error, st.device.is_empty()) {
-                    (Some(_), _)  => ("AUDIO !".to_string(), Color32::from_rgb(255, 110, 110)),
-                    (None, true)  => ("AUDIO —".to_string(), Color32::from_rgb(255, 160, 90)),
-                    (None, false) => (format!("{} · {} MIDI", st.device, st.midi_inputs), chrome.dim),
+                    (Some(_), _)  => ("AUDIO !".to_string(), pal.warm),
+                    (None, true)  => ("AUDIO -".to_string(), pal.warn),
+                    (None, false) => (format!("{} / {} MIDI", st.device, st.midi_inputs), chrome.dim),
                 };
                 let resp = ui.add(egui::Label::new(
                     RichText::new(txt).color(col).size(CHROME_STATUS_PT))
@@ -278,15 +279,13 @@ pub fn plugin_chrome<P: preset_picker::Preset>(
                 let resp = if let Some(e) = &st.error {
                     resp.on_hover_text(e.as_str())
                 } else {
-                    resp.on_hover_text("click: reinitialise audio · right-click: rescan MIDI")
+                    resp.on_hover_text("click: reinitialise audio, right-click: rescan MIDI")
                 };
                 if resp.clicked() {
-                    request(
-                        ui.ctx(), AudioRequest::RestartAudio);
+                    request(ui.ctx(), AudioRequest::RestartAudio);
                 }
                 if resp.secondary_clicked() {
-                    request(
-                        ui.ctx(), AudioRequest::RescanMidi);
+                    request(ui.ctx(), AudioRequest::RescanMidi);
                 }
             }
         });
@@ -297,8 +296,7 @@ pub fn plugin_chrome<P: preset_picker::Preset>(
 /// Pinned chrome row height (px). All title / pills / picker / status
 /// share this row so the chrome looks identical across plugins.
 const CHROME_ROW_H:    f32 = 26.0;
-const CHROME_TITLE_PT: f32 = 14.0;
-const CHROME_PILL_PT:  f32 = 11.0;
+const CHROME_TITLE_PT: f32 = 15.0;
 const CHROME_STATUS_PT:f32 = 10.0;
 const CHROME_GAP:      f32 = 12.0;
 /// The patch name field. Wide enough for the longest factory preset name in
@@ -314,15 +312,24 @@ pub fn plugin_chrome_panel<P: preset_picker::Preset>(
     preset_state: &mut preset_picker::PresetPickerState,
     presets:      &[P],
 ) -> ChromeResult {
-    let pal = Palette::of(ui.ctx());
     egui::Panel::top("plugin_chrome_panel")
-        .frame(
-            egui::Frame::NONE
-                .fill(pal.bg_raised)
-                .inner_margin(egui::Margin::symmetric(10i8, 5i8))
-                .stroke(egui::Stroke::new(1.0_f32, pal.border)),
-        )
-        .show_inside(ui, |ui| plugin_chrome(ui, chrome, preset_state, presets))
+        .frame(egui::Frame::NONE.inner_margin(egui::Margin::symmetric(12i8, 6i8)))
+        .show_separator_line(false)
+        .show_inside(ui, |ui| {
+            // The bar is a plate across the top of the window, painted under
+            // the header once its height is known.
+            let under = ui.painter().add(egui::Shape::Noop);
+            let res = plugin_chrome(ui, chrome, preset_state, presets);
+            let bar = ui.min_rect().expand2(Vec2::new(12.0, 6.0));
+            let bar = egui::Rect::from_min_max(Pos2::new(ui.max_rect().left() - 12.0, bar.top()), Pos2::new(ui.max_rect().right() + 12.0, bar.bottom()));
+            let mut shapes = theme::plate_shapes(ui.ctx(), bar, egui::CornerRadius::ZERO);
+            let pal = Palette::of(ui.ctx());
+            shapes.push(egui::Shape::line_segment(
+                [Pos2::new(bar.left(), bar.bottom() - 0.5), Pos2::new(bar.right(), bar.bottom() - 0.5)],
+                egui::Stroke::new(1.0_f32, pal.well_edge)));
+            ui.painter().set(under, egui::Shape::Vec(shapes));
+            res
+        })
         .inner
 }
 
@@ -363,6 +370,33 @@ mod chrome_tests {
             mode_pills: &pills, buttons: &buttons, status_right: Some("8 voices"),
         });
         assert_eq!(bare, full, "the header changed height with what it carries");
+    }
+
+    /// Look at it: the header every plugin wears. Ignored because it needs
+    /// a rendering backend:
+    ///   VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json \
+    ///   UPDATE_SNAPSHOTS=1 cargo test -p phonix-ui chrome_snapshot -- --ignored
+    #[test]
+    #[ignore = "needs a rendering backend"]
+    fn chrome_snapshot() {
+        let mut state = PresetPickerState::default();
+        let presets = [
+            NamedPreset { name: "Violin Solo", category: Some("Solo") },
+            NamedPreset { name: "Quartet", category: Some("Ensemble") },
+        ];
+        let mut harness = egui_kittest::Harness::builder().with_size(Vec2::new(1160.0, 60.0)).build_ui(move |ui| {
+            Palette::DEFAULT.install(ui.ctx());
+            Palette::DEFAULT.apply_visuals(ui.ctx());
+            let pills = [PillEntry { label: "INSTRUMENT", selected: true }, PillEntry { label: "EFFECTS", selected: false }];
+            let _ = plugin_chrome_panel(ui, &PluginChrome {
+                title: "ARCHET", subtitle: Some("Bowed string"),
+                accent: Color32::from_rgb(230, 150, 60), dim: Color32::from_rgb(140, 140, 150),
+                peak: 0.62, cpu: Some(0.11), preset_salt: "snap", patch_name: Some("Violin Solo"),
+                mode_pills: &pills, buttons: &[], status_right: Some("3 voices"),
+            }, &mut state, &presets);
+        });
+        harness.run_steps(4);
+        harness.snapshot("chrome");
     }
 
     /// Smoke test: chrome with mode pills + status renders without

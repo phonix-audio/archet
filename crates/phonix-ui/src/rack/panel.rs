@@ -1,6 +1,6 @@
 //! One effect's parameters, drawn from its `EffectSpec`.
 
-use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, Ui, Vec2};
+use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Ui, Vec2};
 use phonix_fx::{Curve, EffectSpec, ParamFlags, ParamKind, ParamSpec, SlotSpec, SpecValue, Value};
 
 use super::RackStyle;
@@ -109,7 +109,7 @@ fn cell_label(ui: &Ui, rect: Rect, text: &str, tint: Color32) {
         Pos2::new(rect.center().x, rect.bottom() - 12.0),
         Align2::CENTER_CENTER,
         text,
-        FontId::proportional(9.0),
+        FontId::proportional(Palette::of(ui.ctx()).type_label),
         tint,
     );
 }
@@ -124,25 +124,7 @@ fn list_cell(ui: &mut Ui, height: f32, label: &str, labels: &[&str], selected: u
     let shown = labels.get(selected).copied().unwrap_or("").to_string();
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, format!("{label}: {shown}")));
     let strip = Rect::from_min_size(rect.min + Vec2::new(0.0, 4.0), Vec2::new(LIST_W, 20.0));
-    let mut out = None;
-    let mut cui = ui.new_child(egui::UiBuilder::new().max_rect(strip));
-    let v = &mut cui.style_mut().visuals.widgets;
-    for w in [&mut v.inactive, &mut v.hovered, &mut v.active, &mut v.open] {
-        w.bg_fill = pal.well;
-        w.weak_bg_fill = pal.well;
-        w.bg_stroke = Stroke::new(1.0_f32, pal.well_edge);
-    }
-    cui.style_mut().spacing.button_padding = Vec2::new(4.0, 1.0);
-    egui::ComboBox::from_id_salt(salt)
-        .width(LIST_W - 4.0)
-        .selected_text(egui::RichText::new(labels.get(selected).copied().unwrap_or("")).size(9.5).color(style.accent))
-        .show_ui(&mut cui, |ui| {
-            for (i, l) in labels.iter().enumerate() {
-                if ui.selectable_label(i == selected, egui::RichText::new(*l).size(10.0)).clicked() && i != selected {
-                    out = Some(i);
-                }
-            }
-        });
+    let out = crate::controls::list_well(ui, strip, label, labels, selected, style.accent, salt);
     cell_label(ui, rect, label, pal.text_dim);
     out
 }

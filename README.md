@@ -13,6 +13,7 @@ workspace with one version and one tag.
 | `phonix-ui` | egui, phonix-plugin | the design system as a value, widgets, keyboard, preset picker, plugin chrome; `ui-spec` feature for the layout renderer |
 | `phonix-session` | phonix-music, phonix-fx, phonix-legacy | the sequencer's session |
 | `phonix-legacy` | phonix-fx | reads effect state written before names were the wire format |
+| `phonix-surface` | nothing | a control surface's protocol: HyperControl events, display and lamps |
 
 Depend on a tag, never on a branch:
 
@@ -28,4 +29,6 @@ Windows, and fails if any crate below `phonix-ui` pulls egui in.
 
 ## Licence
 
-MIT. See `LICENSE-MIT`.
+MIT. See `LICENSE-MIT`. The two typefaces under
+`crates/phonix-ui/assets/fonts` are the Noto Project's, under the SIL Open
+Font License 1.1; `NOTICE` lists them.

@@ -147,10 +147,13 @@ pub fn shared_models() -> &'static Vec<Arc<SpectralModel>> {
 
 /// Kick off the model build on a background thread (idempotent). Call from an
 /// engine constructor so the models are ready by the time a Resynth voice runs,
-/// without blocking track construction.
+/// without blocking track construction. When the system refuses the thread
+/// nothing is built, and the next call tries again.
 pub fn warm_in_background() {
     if MODELS.get().is_none() {
-        std::thread::spawn(|| { let _ = shared_models(); });
+        let _ = std::thread::Builder::new()
+            .name("resynth-models".into())
+            .spawn(|| { let _ = shared_models(); });
     }
 }
 

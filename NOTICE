@@ -1,0 +1,10 @@
+Phonix SDK
+Copyright (c) 2026 Phonix Audio
+Licensed under MIT (LICENSE-MIT).
+
+This repository carries work by others under their own terms:
+
+  Noto Sans SemiCondensed (Medium) and Noto Sans Mono (Medium), the faces
+  every editor sets its text in, subset to Latin.
+  Copyright 2022 The Noto Project Authors. SIL Open Font License 1.1.
+  crates/phonix-ui/assets/fonts/, OFL.txt beside them.

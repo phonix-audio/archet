@@ -6,6 +6,7 @@
 //! widget. The vocabulary below takes its colours from the caller or from
 //! the palette and never from a constant.
 
+use egui::epaint::{CornerRadiusF32, PathShape};
 use egui::{Align2, Color32, CornerRadius, FontFamily, FontId, Mesh, Pos2, Rect, Shape, Stroke, StrokeKind, Ui, Vec2};
 
 use crate::colors;
@@ -41,6 +42,31 @@ pub struct Palette {
     /// A knob's pointer at rest, and the shadow under it.
     pub pointer: Color32,
     pub pointer_shadow: Color32,
+    /// The one light, from above: the edge it catches on a raised part,
+    /// the edge it leaves dark, and the shadow a raised part casts below.
+    pub light_edge: Color32,
+    pub shade_edge: Color32,
+    pub shadow: Color32,
+    /// The room behind the instrument, top and bottom.
+    pub backdrop_top: Color32,
+    pub backdrop_bottom: Color32,
+    /// The sheet the plates sit on, top and bottom.
+    pub case_top: Color32,
+    pub case_bottom: Color32,
+    /// The machined cheeks at the ends of the case, and their grain.
+    pub cheek_top: Color32,
+    pub cheek_bottom: Color32,
+    pub cheek_grain: Color32,
+    /// A screw head, lit and in shade.
+    pub screw_lit: Color32,
+    pub screw_shade: Color32,
+    /// The type scale in points: a section heading, silkscreen beside a
+    /// control, a caption under it, a control's label, a value readout.
+    pub type_heading: f32,
+    pub type_silk: f32,
+    pub type_caption: f32,
+    pub type_label: f32,
+    pub type_value: f32,
 }
 
 impl Palette {
@@ -67,15 +93,34 @@ impl Palette {
         silk_dim: colors::TEXT_DIM,
         pointer: Color32::from_rgb(200, 200, 210),
         pointer_shadow: Color32::from_rgb(30, 30, 34),
+        light_edge: Color32::from_rgba_premultiplied(30, 30, 30, 30),
+        shade_edge: Color32::from_rgba_premultiplied(0, 0, 0, 120),
+        shadow: Color32::from_rgba_premultiplied(0, 0, 0, 120),
+        backdrop_top: Color32::from_rgb(30, 30, 35),
+        backdrop_bottom: Color32::from_rgb(12, 12, 15),
+        case_top: Color32::from_rgb(40, 40, 46),
+        case_bottom: Color32::from_rgb(27, 27, 32),
+        cheek_top: Color32::from_rgb(70, 71, 78),
+        cheek_bottom: Color32::from_rgb(38, 39, 44),
+        cheek_grain: Color32::from_rgba_premultiplied(0, 0, 0, 40),
+        screw_lit: Color32::from_rgb(178, 182, 192),
+        screw_shade: Color32::from_rgb(92, 96, 106),
+        type_heading: 9.5,
+        type_silk: 9.0,
+        type_caption: 8.5,
+        type_label: 9.5,
+        type_value: 10.0,
     };
 
     fn id() -> egui::Id {
         egui::Id::new("phonix_palette")
     }
 
-    /// Makes this the palette every shared widget reads on `ctx`.
+    /// Makes this the palette every shared widget reads on `ctx`, and the
+    /// house faces the ones its text is set in.
     pub fn install(self, ctx: &egui::Context) {
         ctx.data_mut(|d| d.insert_temp(Self::id(), self));
+        crate::fonts::install(ctx);
     }
 
     /// The installed palette, or the default.
@@ -83,9 +128,25 @@ impl Palette {
         ctx.data(|d| d.get_temp::<Palette>(Self::id())).unwrap_or(Palette::DEFAULT)
     }
 
-    /// egui's own widgets, tuned to this palette.
+    /// egui's own widgets, tuned to this palette: its popups, tooltips and
+    /// menus are small plates lit from above, its scrollbars sit in the
+    /// well's colours.
     pub fn apply_visuals(&self, ctx: &egui::Context) {
         let mut v = egui::Visuals::dark();
+        v.window_corner_radius = CornerRadius::same(5);
+        v.menu_corner_radius = CornerRadius::same(4);
+        v.window_shadow = egui::Shadow { offset: [0, 4], blur: 14, spread: 0, color: self.shadow };
+        v.popup_shadow = egui::Shadow { offset: [0, 3], blur: 10, spread: 0, color: self.shadow };
+        v.faint_bg_color = self.bg_panel;
+        v.code_bg_color = self.well;
+        v.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, self.well_edge);
+        v.widgets.inactive.weak_bg_fill = self.bg_raised;
+        v.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, self.well_edge);
+        v.widgets.hovered.weak_bg_fill = self.bg_raised;
+        v.widgets.active.weak_bg_fill = self.bg_raised;
+        for w in [&mut v.widgets.noninteractive, &mut v.widgets.inactive, &mut v.widgets.hovered, &mut v.widgets.active, &mut v.widgets.open] {
+            w.corner_radius = CornerRadius::same(3);
+        }
         v.panel_fill = self.bg_dark;
         v.window_fill = self.bg_dark;
         v.extreme_bg_color = self.well;
@@ -103,6 +164,11 @@ impl Palette {
         v.selection.stroke = Stroke::new(1.0_f32, self.accent);
         v.window_stroke = Stroke::new(1.0_f32, self.border);
         ctx.set_visuals(v);
+        ctx.global_style_mut(|s| {
+            s.spacing.scroll = egui::style::ScrollStyle::thin();
+            s.spacing.menu_margin = egui::Margin::same(6);
+            s.spacing.item_spacing = Vec2::new(6.0, 4.0);
+        });
     }
 }
 
@@ -115,17 +181,10 @@ impl Default for Palette {
 /// The name of the display face an instrument may register.
 pub const DISPLAY: &str = "display";
 
-/// Registers `ttf` as the display face. Call once: `set_fonts` rebuilds
-/// every atlas.
+/// Registers `ttf` as the display face, beside the house faces. Cheap to
+/// call every frame: the fonts are set only when the face changes.
 pub fn install_display_face(ctx: &egui::Context, ttf: &'static [u8]) {
-    let mut fonts = egui::FontDefinitions::default();
-    fonts.font_data.insert(DISPLAY.to_owned(), std::sync::Arc::new(egui::FontData::from_static(ttf)));
-    fonts
-        .families
-        .entry(FontFamily::Name(DISPLAY.into()))
-        .or_default()
-        .insert(0, DISPLAY.to_owned());
-    ctx.set_fonts(fonts);
+    crate::fonts::set_display(ctx, ttf);
 }
 
 /// The display face at `size`, or the proportional face while the display
@@ -172,6 +231,77 @@ pub fn gradient_h_on(p: &egui::Painter, rect: Rect, left: Color32, right: Color3
     p.add(Shape::mesh(mesh));
 }
 
+/// A rounded rect filled with a vertical gradient, its edge feathered over
+/// one pixel as egui feathers its own shapes. The fill and a stroke drawn
+/// with the same radius share their corners.
+pub fn gradient_rounded(ui: &Ui, rect: Rect, radius: impl Into<CornerRadius>, top: Color32, bottom: Color32) {
+    gradient_rounded_on(ui.painter(), rect, radius, top, bottom)
+}
+
+pub fn gradient_rounded_on(p: &egui::Painter, rect: Rect, radius: impl Into<CornerRadius>, top: Color32, bottom: Color32) {
+    let mut pts = Vec::new();
+    egui::epaint::tessellator::path::rounded_rectangle(&mut pts, rect, CornerRadiusF32::from(radius.into()));
+    let feather = 1.0 / p.ctx().pixels_per_point();
+    p.add(Shape::mesh(feathered_fan(&pts, rect.center(), feather, |q| {
+        let t = if rect.height() > 0.0 { (q.y - rect.top()) / rect.height() } else { 0.0 };
+        lerp_colour(top, bottom, t)
+    })));
+}
+
+/// A disc shaded from `inner` at `focus` to `outer` at its rim: the dome of
+/// a lens, a cap or a screw head lit from where `focus` sits.
+pub fn radial_disc(ui: &Ui, centre: Pos2, radius: f32, focus: Pos2, inner: Color32, outer: Color32) {
+    if radius <= 0.0 {
+        return;
+    }
+    let n = ((radius * 2.0) as usize).clamp(16, 96);
+    let pts: Vec<Pos2> = (0..n)
+        .map(|i| {
+            let a = i as f32 / n as f32 * std::f32::consts::TAU;
+            centre + Vec2::new(a.cos(), a.sin()) * radius
+        })
+        .collect();
+    let feather = 1.0 / ui.ctx().pixels_per_point();
+    let reach = radius + (focus - centre).length();
+    ui.painter().add(Shape::mesh(feathered_fan(&pts, focus, feather, |q| {
+        lerp_colour(inner, outer, ((q - focus).length() / reach.max(0.001)).powf(0.8))
+    })));
+}
+
+/// A convex outline as a fan from `hub`, each vertex coloured by `shade`,
+/// with a ring of transparent vertices `feather` outside it so the edge is
+/// antialiased.
+fn feathered_fan(pts: &[Pos2], hub: Pos2, feather: f32, shade: impl Fn(Pos2) -> Color32) -> Mesh {
+    let mut mesh = Mesh::default();
+    let n = pts.len();
+    if n < 3 {
+        return mesh;
+    }
+    let centroid = Pos2::new(pts.iter().map(|p| p.x).sum::<f32>() / n as f32, pts.iter().map(|p| p.y).sum::<f32>() / n as f32);
+    mesh.colored_vertex(hub, shade(hub));
+    for i in 0..n {
+        let (prev, here, next) = (pts[(i + n - 1) % n], pts[i], pts[(i + 1) % n]);
+        let normal = |a: Pos2, b: Pos2| {
+            let d = b - a;
+            let nrm = Vec2::new(d.y, -d.x).normalized();
+            if nrm.dot((a + d * 0.5) - centroid) < 0.0 { -nrm } else { nrm }
+        };
+        let mut out = normal(prev, here) + normal(here, next);
+        out = if out.length() > 1e-4 { out.normalized() } else { (here - centroid).normalized() };
+        let c = shade(here);
+        mesh.colored_vertex(here - out * feather * 0.5, c);
+        mesh.colored_vertex(here + out * feather * 0.5, Color32::TRANSPARENT);
+    }
+    for i in 0..n as u32 {
+        let j = (i + 1) % n as u32;
+        let (ii, io, ji, jo) = (1 + 2 * i, 2 + 2 * i, 1 + 2 * j, 2 + 2 * j);
+        mesh.add_triangle(0, ii, ji);
+        mesh.add_triangle(ii, io, ji);
+        mesh.add_triangle(io, jo, ji);
+    }
+    mesh
+}
+
 /// A closed outline filled with a vertical gradient, as a triangle fan from
 /// its centroid. Correct for any outline that can see its own centroid,
 /// concave ones included.
@@ -206,48 +336,179 @@ pub fn lerp_colour(a: Color32, b: Color32, t: f32) -> Color32 {
     Color32::from_rgba_premultiplied(mix(a.r(), b.r()), mix(a.g(), b.g()), mix(a.b(), b.b()), mix(a.a(), b.a()))
 }
 
-/// A panel of the case: the shadow the lip casts on its top edge and the
-/// light that catches its bottom one.
-pub fn plate(ui: &Ui, rect: Rect, radius: impl Into<CornerRadius> + Copy) {
+/// `c` lifted towards white by `t`, its alpha kept.
+pub fn lighten(c: Color32, t: f32) -> Color32 {
+    let w = Color32::from_rgba_premultiplied(c.a(), c.a(), c.a(), c.a());
+    lerp_colour(c, w, t)
+}
+
+/// The shadow a raised part of `rect` casts on what it sits on, from the
+/// light above it.
+pub fn cast_shadow(ui: &Ui, rect: Rect, radius: impl Into<CornerRadius>, lift: f32) {
     let pal = Palette::of(ui.ctx());
-    gradient_v(ui, rect, pal.plate_top, pal.plate_bottom);
+    let shadow = egui::Shadow {
+        offset: [0, lift.round().clamp(0.0, 12.0) as i8],
+        blur: (lift * 3.0).round().clamp(0.0, 40.0) as u8,
+        spread: 0,
+        color: pal.shadow,
+    };
+    ui.painter().add(shadow.as_shape(rect, radius));
+}
+
+/// The light caught by the top edge of a raised part, and the shade along
+/// its bottom one, inside `rect`.
+pub fn lit_edges(ui: &Ui, rect: Rect, radius: f32) {
+    let pal = Palette::of(ui.ctx());
     let p = ui.painter();
-    p.rect_stroke(rect, radius, Stroke::new(1.0_f32, pal.plate_edge), StrokeKind::Inside);
+    let inset = radius.max(1.5);
     p.line_segment(
-        [rect.left_top() + Vec2::new(2.0, 1.0), rect.right_top() + Vec2::new(-2.0, 1.0)],
-        Stroke::new(1.5_f32, Color32::from_rgba_unmultiplied(0, 0, 0, 110)),
+        [Pos2::new(rect.left() + inset, rect.top() + 1.0), Pos2::new(rect.right() - inset, rect.top() + 1.0)],
+        Stroke::new(1.0_f32, pal.light_edge),
     );
     p.line_segment(
-        [rect.left_bottom() + Vec2::new(2.0, -1.0), rect.right_bottom() + Vec2::new(-2.0, -1.0)],
-        Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(255, 255, 255, 20)),
+        [Pos2::new(rect.left() + inset, rect.bottom() - 1.0), Pos2::new(rect.right() - inset, rect.bottom() - 1.0)],
+        Stroke::new(1.0_f32, pal.shade_edge),
     );
 }
 
-/// A well cut into the case: the near wall in shadow, the far wall lit.
+/// A panel of the case, raised off it: the shadow it casts, a gradient
+/// lit from above, the light its top edge catches and its rim.
+pub fn plate(ui: &Ui, rect: Rect, radius: impl Into<CornerRadius> + Copy) {
+    ui.painter().extend(plate_shapes(ui.ctx(), rect, radius.into()));
+}
+
+/// The shapes `plate` paints, for a caller that places them under content
+/// laid out first.
+pub fn plate_shapes(ctx: &egui::Context, rect: Rect, cr: CornerRadius) -> Vec<Shape> {
+    let pal = Palette::of(ctx);
+    let feather = 1.0 / ctx.pixels_per_point();
+    let mut pts = Vec::new();
+    egui::epaint::tessellator::path::rounded_rectangle(&mut pts, rect, CornerRadiusF32::from(cr));
+    let fill = feathered_fan(&pts, rect.center(), feather, |q| {
+        let t = if rect.height() > 0.0 { (q.y - rect.top()) / rect.height() } else { 0.0 };
+        lerp_colour(pal.plate_top, pal.plate_bottom, t)
+    });
+    let inset = cr.average().max(1.5);
+    vec![
+        Shape::Rect(egui::Shadow { offset: [0, 2], blur: 6, spread: 0, color: pal.shadow }.as_shape(rect, cr)),
+        Shape::mesh(fill),
+        Shape::line_segment(
+            [Pos2::new(rect.left() + inset, rect.top() + 1.0), Pos2::new(rect.right() - inset, rect.top() + 1.0)],
+            Stroke::new(1.0_f32, pal.light_edge),
+        ),
+        Shape::line_segment(
+            [Pos2::new(rect.left() + inset, rect.bottom() - 1.0), Pos2::new(rect.right() - inset, rect.bottom() - 1.0)],
+            Stroke::new(1.0_f32, pal.shade_edge),
+        ),
+        Shape::Rect(egui::epaint::RectShape::stroke(rect, cr, Stroke::new(1.0_f32, pal.plate_edge), StrokeKind::Inside)),
+    ]
+}
+
+/// Content laid out on a plate: the plate is painted under it once its
+/// size is known, `margin` inside its rim.
+pub fn plated<R>(ui: &mut Ui, radius: u8, margin: i8, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let under = ui.painter().add(Shape::Noop);
+    let inner = egui::Frame::NONE.inner_margin(margin).show(ui, |ui| {
+        ui.set_min_width(ui.available_width());
+        add(ui)
+    });
+    let shapes = plate_shapes(ui.ctx(), inner.response.rect, CornerRadius::same(radius));
+    ui.painter().set(under, Shape::Vec(shapes));
+    inner.inner
+}
+
+/// A well cut into the case: its near wall throws a soft shadow down into
+/// it, its far wall and the lip below it catch the light.
 pub fn recess(ui: &Ui, rect: Rect, radius: f32) {
     let pal = Palette::of(ui.ctx());
     let p = ui.painter();
     p.rect_filled(rect, radius, pal.well);
+    let inset = radius.max(1.0);
+    for (k, alpha) in [(0.5_f32, 150u8), (1.5, 80), (2.5, 36), (3.5, 14)] {
+        if rect.height() < k * 2.0 + 2.0 {
+            break;
+        }
+        let y = rect.top() + k;
+        p.line_segment(
+            [Pos2::new(rect.left() + inset, y), Pos2::new(rect.right() - inset, y)],
+            Stroke::new(1.0_f32, Color32::from_rgba_premultiplied(0, 0, 0, alpha)),
+        );
+    }
     p.line_segment(
-        [rect.left_top() + Vec2::new(radius, 0.5), rect.right_top() + Vec2::new(-radius, 0.5)],
-        Stroke::new(1.5_f32, Color32::from_rgba_unmultiplied(0, 0, 0, 170)),
-    );
-    p.line_segment(
-        [rect.left_bottom() + Vec2::new(radius, -0.5), rect.right_bottom() + Vec2::new(-radius, -0.5)],
-        Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(255, 255, 255, 24)),
+        [Pos2::new(rect.left() + inset, rect.bottom() - 0.5), Pos2::new(rect.right() - inset, rect.bottom() - 0.5)],
+        Stroke::new(1.0_f32, pal.light_edge),
     );
     p.rect_stroke(rect, radius, Stroke::new(1.0_f32, pal.well_edge), StrokeKind::Inside);
+    p.line_segment(
+        [Pos2::new(rect.left() + inset, rect.bottom() + 0.5), Pos2::new(rect.right() - inset, rect.bottom() + 0.5)],
+        Stroke::new(1.0_f32, pal.light_edge.gamma_multiply(0.7)),
+    );
+}
+
+/// The room behind the instrument: a gradient, darker at its sides.
+pub fn backdrop(ui: &Ui, rect: Rect) {
+    let pal = Palette::of(ui.ctx());
+    gradient_v(ui, rect, pal.backdrop_top, pal.backdrop_bottom);
+    let side = (rect.width() * 0.08).min(80.0);
+    let dark = Color32::from_rgba_premultiplied(0, 0, 0, 70);
+    gradient_h(ui, Rect::from_min_size(rect.min, Vec2::new(side, rect.height())), dark, Color32::TRANSPARENT);
+    gradient_h(ui, Rect::from_min_max(Pos2::new(rect.right() - side, rect.top()), rect.max), Color32::TRANSPARENT, dark);
+}
+
+/// A machined, brushed surface: `top` to `bottom`, with the fine grain the
+/// brush leaves across it. The grain is seeded by the rect, so a surface
+/// keeps its grain from frame to frame.
+pub fn brushed(ui: &Ui, rect: Rect, radius: impl Into<CornerRadius> + Copy, top: Color32, bottom: Color32, grain: Color32) {
+    gradient_rounded(ui, rect, radius, top, bottom);
+    let p = ui.painter().with_clip_rect(rect.shrink(1.0));
+    let mut y = rect.top() + 1.0;
+    let mut k = (rect.left() * 7.0 + rect.top() * 13.0) as u32;
+    while y < rect.bottom() - 1.0 {
+        k = k.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        let a = 0.35 + (k >> 24) as f32 / 255.0 * 0.65;
+        p.line_segment([Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)], Stroke::new(1.0_f32, grain.gamma_multiply(a)));
+        y += 2.0;
+    }
+}
+
+/// The width of a cheek of the case.
+pub const CHEEK_W: f32 = 16.0;
+
+/// The case the plates are set into: its shadow, the sheet, a machined
+/// cheek at each end with a screw near each corner. Returns the sheet
+/// between the cheeks.
+pub fn case(ui: &Ui, rect: Rect) -> Rect {
+    let pal = Palette::of(ui.ctx());
+    let r = 6u8;
+    cast_shadow(ui, rect, r, 4.0);
+    gradient_rounded(ui, rect, r, pal.case_top, pal.case_bottom);
+    let left = Rect::from_min_size(rect.min, Vec2::new(CHEEK_W, rect.height()));
+    let right = Rect::from_min_size(Pos2::new(rect.right() - CHEEK_W, rect.top()), Vec2::new(CHEEK_W, rect.height()));
+    brushed(ui, left, CornerRadius { nw: r, sw: r, ne: 0, se: 0 }, pal.cheek_top, pal.cheek_bottom, pal.cheek_grain);
+    brushed(ui, right, CornerRadius { nw: 0, sw: 0, ne: r, se: r }, pal.cheek_top, pal.cheek_bottom, pal.cheek_grain);
+    let p = ui.painter();
+    for x in [left.right(), right.left()] {
+        p.line_segment([Pos2::new(x, rect.top() + 1.0), Pos2::new(x, rect.bottom() - 1.0)], Stroke::new(1.0_f32, pal.well_edge));
+    }
+    lit_edges(ui, rect, r as f32);
+    p.rect_stroke(rect, r, Stroke::new(1.0_f32, pal.well_edge), StrokeKind::Inside);
+    for y in [rect.top() + 14.0, rect.bottom() - 14.0] {
+        screw(ui, Pos2::new(left.center().x, y), 3.2);
+        screw(ui, Pos2::new(right.center().x, y), 3.2);
+    }
+    Rect::from_min_max(Pos2::new(left.right(), rect.top()), Pos2::new(right.left(), rect.bottom()))
 }
 
 /// Text screened onto a surface: a pale line under the letters, then the ink.
 pub fn printed(ui: &Ui, pos: Pos2, text: &str, font: FontId, ink: Color32, anchor: Align2) {
-    ui.painter().text(pos + Vec2::new(0.0, 1.0), anchor, text, font.clone(), Color32::from_rgba_unmultiplied(255, 255, 255, 26));
+    ui.painter().text(pos + Vec2::new(0.0, 1.0), anchor, text, font.clone(), Color32::from_rgba_unmultiplied(255, 255, 255, 18));
     ui.painter().text(pos, anchor, text, font, ink);
 }
 
 /// Text cut into a surface: a lighter lip below the letters.
 pub fn engraved(ui: &Ui, pos: Pos2, text: &str, font: FontId, ink: Color32, anchor: Align2) {
-    ui.painter().text(pos + Vec2::new(0.0, 1.0), anchor, text, font.clone(), Color32::from_rgba_unmultiplied(255, 255, 255, 40));
+    ui.painter().text(pos + Vec2::new(0.0, 1.0), anchor, text, font.clone(), Color32::from_rgba_unmultiplied(255, 255, 255, 34));
+    ui.painter().text(pos + Vec2::new(0.0, -0.5), anchor, text, font.clone(), Color32::from_rgba_unmultiplied(0, 0, 0, 90));
     ui.painter().text(pos, anchor, text, font, ink);
 }
 
@@ -264,6 +525,17 @@ pub enum Relief {
     Printed,
     Embossed,
     Flat,
+}
+
+/// The width `text` takes set with `tracking` between its letters.
+pub fn tracked_width(ui: &Ui, text: &str, font: FontId, tracking: f32) -> f32 {
+    let mut w = 0.0;
+    let mut n = 0;
+    for ch in text.chars() {
+        w += ui.painter().layout_no_wrap(ch.to_string(), font.clone(), Color32::WHITE).size().x;
+        n += 1;
+    }
+    w + tracking * (n.max(1) - 1) as f32
 }
 
 /// Letters spaced apart, painted one at a time. Returns the total width.
@@ -288,44 +560,76 @@ pub fn tracked_text(ui: &Ui, left: Pos2, text: &str, font: FontId, ink: Color32,
 /// A section heading in the silkscreen: tracked capitals over a hairline
 /// that runs to at least `rule_to`.
 pub fn heading(ui: &Ui, at: Pos2, title: &str, ink: Color32, rule_to: f32) {
-    let w = tracked_text(ui, at, title, FontId::proportional(9.0), ink, 1.4, Relief::Printed);
-    let y = at.y + 8.0;
-    ui.painter().line_segment([Pos2::new(at.x, y), Pos2::new(rule_to.max(at.x + w), y)], Stroke::new(1.0_f32, ink.gamma_multiply(0.35)));
+    let pal = Palette::of(ui.ctx());
+    let w = tracked_text(ui, at, title, FontId::proportional(pal.type_heading), ink, 1.4, Relief::Printed);
+    let y = at.y + 8.5;
+    let p = ui.painter();
+    p.line_segment([Pos2::new(at.x, y), Pos2::new(rule_to.max(at.x + w), y)], Stroke::new(1.0_f32, ink.gamma_multiply(0.35)));
+    p.line_segment([Pos2::new(at.x, y + 1.0), Pos2::new(rule_to.max(at.x + w), y + 1.0)], Stroke::new(1.0_f32, pal.light_edge.gamma_multiply(0.6)));
 }
 
 /// Small print under a control, one line per line, no wrapping.
 pub fn caption(ui: &Ui, at: Pos2, text: &str, ink: Color32) {
-    caption_sized(ui, at, text, ink, 8.5)
+    let size = Palette::of(ui.ctx()).type_caption;
+    caption_sized(ui, at, text, ink, size)
 }
 
 pub fn caption_sized(ui: &Ui, at: Pos2, text: &str, ink: Color32, size: f32) {
     for (i, line) in text.lines().enumerate() {
-        ui.painter().text(at + Vec2::new(0.0, i as f32 * (size + 2.0)), Align2::LEFT_TOP, line, FontId::proportional(size), ink);
+        ui.painter().text(at + Vec2::new(0.0, i as f32 * (size + 2.5)), Align2::LEFT_TOP, line, FontId::proportional(size), ink);
     }
 }
 
-/// A lamp: halo, body, and the glint that sells it as a lens.
+/// A lamp: a lens set in a bezel. Lit, it glows through a falloff of light
+/// around it; dark, it is still glass, with its dome and glint.
 pub fn lamp(ui: &Ui, centre: Pos2, radius: f32, on: bool, tint: Color32) {
     let pal = Palette::of(ui.ctx());
     let p = ui.painter();
     if on {
-        p.circle_filled(centre, radius * 2.4, tint.gamma_multiply(0.16));
-        p.circle_filled(centre, radius * 1.5, tint.gamma_multiply(0.32));
+        for k in (1..=6).rev() {
+            let f = k as f32 / 6.0;
+            p.circle_filled(centre, radius * (1.0 + 1.6 * f), tint.gamma_multiply(0.07 * (1.0 - f * 0.7)));
+        }
     }
-    p.circle_filled(centre, radius, if on { tint } else { pal.lamp_off });
-    p.circle_stroke(centre, radius, Stroke::new(1.0_f32, pal.well_edge));
+    p.circle_filled(centre, radius + 1.0, pal.well_edge);
+    let focus = centre - Vec2::new(radius * 0.3, radius * 0.35);
     if on {
-        p.circle_filled(centre - Vec2::splat(radius * 0.34), radius * 0.3, Color32::from_rgba_unmultiplied(255, 255, 255, 150));
+        radial_disc(ui, centre, radius, focus, lighten(tint, 0.55), tint.gamma_multiply(0.75));
+    } else {
+        radial_disc(ui, centre, radius, focus, lighten(pal.lamp_off, 0.18), lerp_colour(pal.lamp_off, pal.well, 0.6));
     }
+    let glint = if on { 170 } else { 55 };
+    p.circle_filled(centre - Vec2::new(radius * 0.32, radius * 0.38), radius * 0.28, Color32::from_rgba_unmultiplied(255, 255, 255, glint));
 }
 
-/// A slotted screw head.
+/// A slotted screw head, turned: domed and lit from above, its slot at an
+/// angle of its own, so the screws of a case do not all line up.
 pub fn screw(ui: &Ui, centre: Pos2, r: f32) {
+    let pal = Palette::of(ui.ctx());
     let p = ui.painter();
-    p.circle_filled(centre + Vec2::new(0.0, 0.6), r, Color32::from_rgba_unmultiplied(0, 0, 0, 90));
-    p.circle_filled(centre, r, Color32::from_rgb(150, 156, 168));
-    p.circle_stroke(centre, r, Stroke::new(0.8_f32, Color32::from_rgb(52, 56, 66)));
-    p.line_segment([centre - Vec2::new(r * 0.6, 0.0), centre + Vec2::new(r * 0.6, 0.0)], Stroke::new(1.2_f32, Color32::from_rgb(46, 50, 58)));
+    p.circle_filled(centre + Vec2::new(0.0, 0.8), r + 0.6, pal.shadow);
+    radial_disc(ui, centre, r, centre - Vec2::new(r * 0.3, r * 0.45), pal.screw_lit, pal.screw_shade);
+    p.circle_stroke(centre, r, Stroke::new(0.8_f32, pal.well_edge));
+    let seed = ((centre.x * 12.9898 + centre.y * 78.233).sin() * 43_758.547).fract().abs();
+    let a = seed * std::f32::consts::PI;
+    let d = Vec2::new(a.cos(), a.sin()) * r * 0.72;
+    p.line_segment([centre - d, centre + d], Stroke::new(1.3_f32, pal.well_edge));
+    p.line_segment([centre - d + Vec2::new(0.0, 0.7), centre + d + Vec2::new(0.0, 0.7)], Stroke::new(0.6_f32, pal.light_edge));
+}
+
+/// An arc of `radius` round `centre` from angle `a0` to `a1`, as one path.
+pub fn arc(ui: &Ui, centre: Pos2, radius: f32, a0: f32, a1: f32, stroke: Stroke) {
+    if (a1 - a0).abs() < 1e-4 {
+        return;
+    }
+    let n = (((a1 - a0).abs() * radius / 2.0) as usize).clamp(4, 128);
+    let pts: Vec<Pos2> = (0..=n)
+        .map(|i| {
+            let a = a0 + (a1 - a0) * i as f32 / n as f32;
+            centre + Vec2::new(a.cos(), a.sin()) * radius
+        })
+        .collect();
+    ui.painter().add(PathShape::line(pts, stroke));
 }
 
 /// A line struck through a rect: a control that is on the panel and inert.
@@ -371,6 +675,30 @@ mod tests {
         assert!(lum(p.well) <= lum(p.bg_dark));
     }
 
+    /// The rounded gradient's solid vertices stay inside the rounded rect,
+    /// and only its feather ring reaches half a pixel outside it.
+    #[test]
+    fn the_rounded_gradient_keeps_to_its_corners() {
+        let rect = Rect::from_min_size(Pos2::new(10.0, 20.0), Vec2::new(80.0, 30.0));
+        let mut pts = Vec::new();
+        egui::epaint::tessellator::path::rounded_rectangle(&mut pts, rect, CornerRadiusF32::same(6.0));
+        let mesh = feathered_fan(&pts, rect.center(), 1.0, |_| Color32::WHITE);
+        let inside = |q: Pos2, slack: f32| {
+            let r = 6.0;
+            let cx = q.x.clamp(rect.left() + r, rect.right() - r);
+            let cy = q.y.clamp(rect.top() + r, rect.bottom() - r);
+            (q - Pos2::new(cx, cy)).length() <= r + slack
+        };
+        for v in &mesh.vertices {
+            if v.color == Color32::TRANSPARENT {
+                assert!(inside(v.pos, 0.51), "feather vertex {:?} strayed", v.pos);
+            } else {
+                assert!(inside(v.pos, 0.01), "solid vertex {:?} left the rounded rect", v.pos);
+            }
+        }
+        assert!(!inside(Pos2::new(rect.left() + 0.5, rect.top() + 0.5), 0.0), "a corner is cut");
+    }
+
     #[test]
     fn the_vocabulary_paints_without_panicking() {
         let ctx = egui::Context::default();
@@ -378,6 +706,12 @@ mod tests {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let r = Rect::from_min_size(Pos2::ZERO, Vec2::new(120.0, 40.0));
                 plate(ui, r, 3.0);
+                gradient_rounded(ui, r, 4, Color32::RED, Color32::BLUE);
+                radial_disc(ui, r.center(), 8.0, r.center(), Color32::WHITE, Color32::BLACK);
+                let sheet = case(ui, r);
+                assert!(sheet.width() < r.width());
+                backdrop(ui, r);
+                arc(ui, r.center(), 10.0, 0.0, 3.0, Stroke::new(1.0_f32, Color32::WHITE));
                 recess(ui, r.shrink(4.0), 2.0);
                 heading(ui, r.left_top(), "SECTION", Color32::WHITE, r.right());
                 caption(ui, r.left_bottom(), "one\ntwo", Color32::GRAY);

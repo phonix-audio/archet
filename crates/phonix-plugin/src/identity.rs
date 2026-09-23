@@ -30,8 +30,8 @@ mod tests {
     #[test]
     fn the_hex_spelling_is_uppercase_and_thirty_two_wide() {
         let id = Identity {
-            name: "X", vendor: "Y", class_id: *b"PxCordisPiano001", clap_id: "z", persist_key: "patch",
+            name: "X", vendor: "Y", class_id: *b"PxPhonixPiano001", clap_id: "z", persist_key: "patch",
         };
-        assert_eq!(id.class_id_hex(), "5078436F726469735069616E6F303031");
+        assert_eq!(id.class_id_hex(), "507850686F6E69785069616E6F303031");
     }
 }

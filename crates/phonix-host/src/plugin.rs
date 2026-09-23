@@ -187,6 +187,18 @@ impl HostedPlugin {
         }
     }
 
+    /// The plugin's own words for a parameter at a normalized value, in
+    /// either format: what a host shows beside the number.
+    pub fn param_text_normalized(&self, id: u32, normalized: f64) -> Option<String> {
+        match self {
+            HostedPlugin::Vst3(p) => p.param_text(id, normalized),
+            HostedPlugin::Clap(p) => {
+                let info = p.params().iter().find(|i| i.id == id)?;
+                p.param_text(id, info.denormalize(normalized as f32))
+            }
+        }
+    }
+
     pub fn get_state(&self) -> Vec<u8> {
         match self { HostedPlugin::Vst3(p) => p.get_state(), HostedPlugin::Clap(p) => p.save_state() }
     }
