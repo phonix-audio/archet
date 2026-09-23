@@ -12,24 +12,6 @@ use crate::colors::*;
 use crate::panel_geom as geom;
 use crate::theme;
 
-/// The extrusion the panel is set into: two machined cheeks and the
-/// anodised sheet between them. Returns the sheet.
-pub fn case(ui: &Ui, rect: Rect) -> Rect {
-    let cheek_w = 16.0;
-    theme::panel(ui, rect, 6.0);
-    let left = Rect::from_min_size(rect.min, Vec2::new(cheek_w, rect.height()));
-    let right = Rect::from_min_size(Pos2::new(rect.right() - cheek_w, rect.top()), Vec2::new(cheek_w, rect.height()));
-    theme::cheek(ui, left, 6.0);
-    theme::cheek(ui, right, 6.0);
-    for y in [rect.top() + 14.0, rect.bottom() - 14.0] {
-        theme::screw(ui, Pos2::new(left.center().x, y), 3.0);
-        theme::screw(ui, Pos2::new(right.center().x, y), 3.0);
-    }
-    Rect::from_min_max(
-        Pos2::new(left.right(), rect.top()),
-        Pos2::new(right.left(), rect.bottom()),
-    )
-}
 
 /// A row of exclusive choices in a slot cut into the plate.
 pub fn switch(ui: &mut Ui, rect: Rect, labels: &[&str], sel: usize, tint: Color32, salt: &str) -> Option<usize> {

@@ -11,7 +11,7 @@
 //! screw, the printed and tracked type, is `phonix_ui::theme`, reading the
 //! palette installed here.
 
-use egui::{Color32, CornerRadius, Pos2, Rect, Stroke, StrokeKind, Ui};
+use egui::{Color32, Pos2, Rect, Stroke, Ui};
 use phonix_ui::theme::Palette;
 
 use crate::colors::*;
@@ -41,6 +41,15 @@ pub const PALETTE: Palette = Palette {
     silk_dim: PLATE_SILK_DIM,
     pointer: Color32::from_rgb(238, 235, 226),
     pointer_shadow: Color32::from_rgb(16, 15, 14),
+    light_edge: Color32::from_rgba_premultiplied(26, 26, 26, 26),
+    backdrop_top: Color32::from_rgb(26, 22, 20),
+    backdrop_bottom: Color32::from_rgb(10, 9, 8),
+    case_top: PANEL_TOP,
+    case_bottom: PANEL_BOTTOM,
+    cheek_top: CHEEK_TOP,
+    cheek_bottom: CHEEK_BOTTOM,
+    cheek_grain: CHEEK_GRAIN,
+    ..Palette::DEFAULT
 };
 
 /// Installs the palette and tunes egui's own widgets to it.
@@ -54,26 +63,7 @@ pub fn tracked(ui: &Ui, left: Pos2, text: &str, font: egui::FontId, ink: Color32
     phonix_ui::theme::tracked_text(ui, left, text, font, ink, tracking, phonix_ui::theme::Relief::Printed)
 }
 
-/// The anodised panel: a gradient with a soft sheen across the top, which
-/// is what a brushed sheet does under a room light.
-pub fn panel(ui: &Ui, rect: Rect, radius: impl Into<CornerRadius> + Copy) {
-    gradient_v(ui, rect, PANEL_TOP, PANEL_BOTTOM);
-    ui.painter().rect_stroke(rect, radius, Stroke::new(1.0_f32, PANEL_EDGE), StrokeKind::Inside);
-}
 
-/// The machined cheek at each end of the extrusion.
-pub fn cheek(ui: &Ui, rect: Rect, radius: impl Into<CornerRadius> + Copy) {
-    let _ = radius;
-    gradient_v(ui, rect, CHEEK_TOP, CHEEK_BOTTOM);
-    let n = (rect.height() / 4.0) as usize;
-    for i in 0..n {
-        let y = rect.top() + i as f32 * 4.0 + 2.0;
-        ui.painter().line_segment(
-            [Pos2::new(rect.left() + 2.0, y), Pos2::new(rect.right() - 2.0, y)],
-            Stroke::new(1.0_f32, CHEEK_GRAIN),
-        );
-    }
-}
 
 /// A signal run between two parts of the panel: lit when what it carries
 /// is sounding, dark when it is not.

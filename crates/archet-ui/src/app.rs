@@ -199,9 +199,9 @@ impl ArchetApp {
             .frame(egui::Frame::NONE.fill(PANEL_EDGE))
             .show_inside(ui, |ui| {
                 let full = ui.max_rect();
-                theme::gradient_v(ui, full, Color32::from_rgb(26, 22, 20), Color32::from_rgb(10, 9, 8));
+                phonix_ui::theme::backdrop(ui, full);
                 let case = Rect::from_min_max(full.min + Vec2::new(8.0, 6.0), full.max - Vec2::new(8.0, 10.0));
-                let panel = machine::case(ui, case);
+                let panel = phonix_ui::theme::case(ui, case);
                 if self.tab == 1 {
                     // The effects take the whole case: three effects want
                     // more than a tier could give.
