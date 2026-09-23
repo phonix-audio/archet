@@ -40,7 +40,7 @@ pub fn face(ui: &Ui, rect: Rect, lit: bool, down: bool, hovered: bool, tint: Col
     if !down {
         lit_edges(ui, r, RADIUS);
     }
-    let rim = if lit { tint } else if hovered { pal.silk_dim.gamma_multiply(0.8) } else { pal.well_edge };
+    let rim = if lit { tint } else if hovered { pal.silk_dim.gamma_multiply(0.8) } else { pal.shade_edge };
     ui.painter().rect_stroke(r, RADIUS, Stroke::new(1.0_f32, rim), StrokeKind::Inside);
 }
 
@@ -181,7 +181,7 @@ pub fn cap(ui: &Ui, rect: Rect, tint: Color32, across: bool) {
     cast_shadow(ui, rect, 2, 2.0);
     gradient_rounded(ui, rect, 2, lighten(pal.bg_raised, 0.22), pal.bg_panel);
     lit_edges(ui, rect, 2.0);
-    ui.painter().rect_stroke(rect, 2.0, Stroke::new(1.0_f32, pal.well_edge), StrokeKind::Inside);
+    ui.painter().rect_stroke(rect, 2.0, Stroke::new(1.0_f32, pal.shade_edge), StrokeKind::Inside);
     let c = rect.center();
     let line = if across {
         [Pos2::new(c.x, rect.top() + 2.0), Pos2::new(c.x, rect.bottom() - 2.0)]

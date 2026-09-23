@@ -488,10 +488,10 @@ pub fn case(ui: &Ui, rect: Rect) -> Rect {
     brushed(ui, right, CornerRadius { nw: 0, sw: 0, ne: r, se: r }, pal.cheek_top, pal.cheek_bottom, pal.cheek_grain);
     let p = ui.painter();
     for x in [left.right(), right.left()] {
-        p.line_segment([Pos2::new(x, rect.top() + 1.0), Pos2::new(x, rect.bottom() - 1.0)], Stroke::new(1.0_f32, pal.well_edge));
+        p.line_segment([Pos2::new(x, rect.top() + 1.0), Pos2::new(x, rect.bottom() - 1.0)], Stroke::new(1.0_f32, pal.shade_edge));
     }
     lit_edges(ui, rect, r as f32);
-    p.rect_stroke(rect, r, Stroke::new(1.0_f32, pal.well_edge), StrokeKind::Inside);
+    p.rect_stroke(rect, r, Stroke::new(1.0_f32, pal.shade_edge), StrokeKind::Inside);
     for y in [rect.top() + 14.0, rect.bottom() - 14.0] {
         screw(ui, Pos2::new(left.center().x, y), 3.2);
         screw(ui, Pos2::new(right.center().x, y), 3.2);
