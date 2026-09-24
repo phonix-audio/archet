@@ -18,7 +18,8 @@ use egui::*;
 pub enum KeyEvent {
     On { note: u8, velocity: u8 },
     Off { note: u8 },
-    /// Pitch-bend wheel, normalized -1..+1 (0 = center; snaps back on release).
+    /// The pitch-bend wheel, -1 to 1, springing back to 0. A host bends by
+    /// `value * BEND_SEMITONES`, the same distance as the host's own bend.
     PitchBend(f32),
     /// Mod wheel, 0..1 (latched).
     ModWheel(f32),
@@ -69,6 +70,15 @@ impl KeyboardState {
         }
     }
 }
+
+/// Semitones the pitch-bend wheel reaches at either end: the range a
+/// host's MIDI pitch bend maps to as well, so both bend alike.
+pub const BEND_SEMITONES: f32 = 2.0;
+
+/// The white-key width the keyboard fits its octaves to.
+const FIT_KEY_W: f32 = 22.0;
+/// The width of one wheel.
+const WHEEL_W: f32 = 18.0;
 
 /// Visual + behaviour options for [`keyboard_ui`].
 pub struct KeyboardStyle {
@@ -128,6 +138,13 @@ pub const BLACK_KEY_POSITIONS: [usize; 5] = [0, 1, 3, 4, 5]; // C#=after C, D#=a
 pub fn keyboard_ui(ui: &mut Ui, state: &mut KeyboardState, style: &KeyboardStyle) -> Vec<KeyEvent> {
     let mut events: Vec<KeyEvent> = Vec::new();
 
+    // As many octaves as the width holds at a playable key width, never fewer
+    // than the state asks for, and never past the top of MIDI's range.
+    let wheels_w = if style.wheels { 2.0 * WHEEL_W + 12.0 } else { 0.0 };
+    let fit = ((ui.available_width() - wheels_w) / (7.0 * FIT_KEY_W)).floor().max(1.0) as u8;
+    state.octaves_shown = fit.max(state.octaves_shown).min(10);
+    state.octave = state.octave.min(10 - state.octaves_shown);
+
     // ── Header: octave shift + range readout ──
     if style.header {
         ui.horizontal(|ui| {
@@ -135,7 +152,7 @@ pub fn keyboard_ui(ui: &mut Ui, state: &mut KeyboardState, style: &KeyboardStyle
             ui.label(RichText::new("OCT").color(pal.text_dim).size(pal.type_caption));
             match crate::controls::flow_stepper(ui, 52.0, &format!("{}", state.octave), (style.id_salt, "octave")) {
                 Some(-1) => state.octave = state.octave.saturating_sub(1),
-                Some(_) if state.octave < 9 => state.octave += 1,
+                Some(_) if state.octave + state.octaves_shown < 10 => state.octave += 1,
                 _ => {}
             }
             let base = state.octave as i32 * 12;
@@ -177,8 +194,7 @@ fn draw_wheel(
     accent: Color32,
 ) -> Option<f32> {
     let (lo, hi) = if snap_back { (-1.0f32, 1.0f32) } else { (0.0f32, 1.0f32) };
-    let w = 18.0;
-    let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, height), Sense::click_and_drag());
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(WHEEL_W, height), Sense::click_and_drag());
     let mut changed = None;
     if resp.dragged() || resp.drag_started() {
         if let Some(pos) = resp.interact_pointer_pos() {
