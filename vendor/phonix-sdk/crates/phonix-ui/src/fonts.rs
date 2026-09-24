@@ -146,9 +146,9 @@ mod tests {
     #[test]
     fn installing_twice_sets_the_fonts_once() {
         let ctx = Context::default();
-        let _ = ctx.run(Default::default(), |ctx| install(ctx));
+        let _ = ctx.run_ui(Default::default(), |ui| install(ui.ctx()));
         let first = ctx.data(|d| d.get_temp::<Installed>(installed_id())).unwrap().pass;
-        let _ = ctx.run(Default::default(), |ctx| install(ctx));
+        let _ = ctx.run_ui(Default::default(), |ui| install(ui.ctx()));
         assert_eq!(ctx.data(|d| d.get_temp::<Installed>(installed_id())).unwrap().pass, first);
     }
 }

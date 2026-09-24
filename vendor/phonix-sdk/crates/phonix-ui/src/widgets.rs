@@ -449,7 +449,9 @@ fn draw_knob_look(
     // form aligned columns. Labels up to ~9 chars fit centred; longer ones bleed
     // a couple px into the inter-knob gap (painted, no layout displacement).
     let label_up = label.to_uppercase();
-    let group_w = s.max(KNOB_GROUP_W);
+    // The group is KNOB_GROUP_W wide, or the narrower cell a layout gives it,
+    // never narrower than the knob itself.
+    let group_w = KNOB_GROUP_W.min(ui.available_width()).max(s);
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(group_w, total_height), Sense::click_and_drag());
     let painter = ui.painter();
@@ -908,8 +910,11 @@ pub fn panel_frame<R>(
     ui: &mut Ui,
     add: impl FnOnce(&mut Ui) -> R,
 ) -> R {
-    crate::theme::plated(ui, 4, 10, add)
+    crate::theme::plated(ui, 4, PANEL_MARGIN as i8, add)
 }
+
+/// The margin inside a framed panel, between its rim and its content.
+pub const PANEL_MARGIN: f32 = 10.0;
 
 /// Shared house-style tab strip: draws `labels` as a horizontal row of tab
 /// buttons, the one at `selected` highlighted in `accent`. Returns Some(index)
@@ -1178,9 +1183,20 @@ const STICKY_SLOT: &str = "phonix_sticky_menu_open";
 /// report cannot arrive from a third construct. `content` returns true to ask
 /// for the menu to close, e.g. after an entry has been chosen.
 pub fn sticky_menu_button(ui: &mut Ui, label: &str, content: impl FnOnce(&mut Ui) -> bool) {
-    use egui::Id;
     let tint = Palette::of(ui.ctx()).accent;
     let resp = crate::controls::flow_button(ui, label, false, tint);
+    sticky_menu_from(ui, resp, label, content);
+}
+
+/// `sticky_menu_button` as a menu bar's title: drawn like the bar's other
+/// titles, opening the same sticky popup.
+pub fn sticky_menu_title(ui: &mut Ui, label: &str, content: impl FnOnce(&mut Ui) -> bool) {
+    let resp = ui.button(label);
+    sticky_menu_from(ui, resp, label, content);
+}
+
+fn sticky_menu_from(ui: &mut Ui, resp: Response, label: &str, content: impl FnOnce(&mut Ui) -> bool) {
+    use egui::Id;
     let ctx = ui.ctx().clone();
     let slot = Id::new(STICKY_SLOT);
     let key = slot.with(resp.id).with(label);

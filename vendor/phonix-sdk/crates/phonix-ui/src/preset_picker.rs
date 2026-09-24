@@ -147,16 +147,30 @@ pub fn picker_ui<P: Preset>(
             // A fixed slot, so a category's name changing width as the
             // presets are stepped through moves nothing after it.
             let (chip, _) = ui.allocate_exact_size(Vec2::new(66.0, 22.0), Sense::hover());
-            let text = cur_cat.unwrap_or("").to_uppercase();
-            let clipped = ui.painter().with_clip_rect(chip);
-            clipped.text(Pos2::new(chip.right() - 4.0, chip.center().y), Align2::RIGHT_CENTER, text,
-                FontId::proportional(pal.type_caption), style.dim);
+            // Elided rather than cut, so a long category still reads.
+            let font = FontId::proportional(pal.type_caption);
+            let room = chip.width() - 4.0;
+            let fits = |t: &str| ui.painter().layout_no_wrap(t.to_string(), font.clone(), style.dim).size().x <= room;
+            let mut text = cur_cat.unwrap_or("").to_uppercase();
+            if !fits(&text) {
+                while !text.is_empty() && !fits(&format!("{text}..")) {
+                    text.pop();
+                }
+                text.push_str("..");
+            }
+            ui.painter().text(Pos2::new(chip.right() - 4.0, chip.center().y), Align2::RIGHT_CENTER, text, font, style.dim);
         }
 
         // The nameplate: a well with a step either side, the name in it,
         // and a click on the name opens the list.
         let (plate, _) = ui.allocate_exact_size(Vec2::new(COMBO_WIDTH_PX + 32.0, 22.0), Sense::hover());
-        crate::theme::recess(ui, plate, 3.0);
+        // Struck metal where the palette names one, a well otherwise.
+        let struck = pal.nameplate_face.a() > 0;
+        if struck {
+            crate::theme::nameplate(ui, plate, 3.0);
+        } else {
+            crate::theme::recess(ui, plate, 3.0);
+        }
         let step = 16.0;
         let left = Rect::from_min_size(plate.min, Vec2::new(step, plate.height()));
         let right = Rect::from_min_size(Pos2::new(plate.right() - step, plate.top()), Vec2::new(step, plate.height()));
@@ -168,16 +182,26 @@ pub fn picker_ui<P: Preset>(
         rl.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "PREVIOUS PRESET"));
         rr.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "NEXT PRESET"));
         rb.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, "PRESETS"));
-        crate::controls::chevron(ui, left.center(), -1.0, if rl.hovered() { pal.silk } else { pal.silk_dim });
-        crate::controls::chevron(ui, right.center(), 1.0, if rr.hovered() { pal.silk } else { pal.silk_dim });
+        let (lit, dim) = if struck { (pal.nameplate_ink, pal.nameplate_ink.gamma_multiply(0.7)) } else { (pal.silk, pal.silk_dim) };
+        crate::controls::chevron(ui, left.center(), -1.0, if rl.hovered() { lit } else { dim });
+        crate::controls::chevron(ui, right.center(), 1.0, if rr.hovered() { lit } else { dim });
         for x in [left.right(), right.left()] {
-            ui.painter().line_segment([Pos2::new(x, plate.top() + 4.0), Pos2::new(x, plate.bottom() - 4.0)], egui::Stroke::new(1.0_f32, pal.well_edge));
+            ui.painter().line_segment([Pos2::new(x, plate.top() + 4.0), Pos2::new(x, plate.bottom() - 4.0)], egui::Stroke::new(1.0_f32, if struck { pal.nameplate_edge } else { pal.well_edge }));
         }
         let shown = if style.name_in_combo { cur_label } else { "Presets" };
-        let ink = if rb.hovered() { crate::theme::lighten(style.accent, 0.25) } else { style.accent };
-        ui.painter().with_clip_rect(body.shrink2(Vec2::new(6.0, 0.0))).text(
-            Pos2::new(body.left() + 8.0, body.center().y), Align2::LEFT_CENTER, shown,
-            FontId::proportional(pal.type_value + 1.0), ink);
+        if struck {
+            let ink = if rb.hovered() { crate::theme::lighten(pal.nameplate_ink, 0.2) } else { pal.nameplate_ink };
+            let font = crate::theme::display_font(ui.ctx(), pal.type_value + 3.0);
+            let clip = body.shrink2(Vec2::new(6.0, 0.0));
+            let at = Pos2::new(body.center().x - 5.0, body.center().y);
+            ui.painter().with_clip_rect(clip).text(at + Vec2::new(0.0, 1.0), Align2::CENTER_CENTER, shown, font.clone(), pal.nameplate_face.gamma_multiply(1.2));
+            ui.painter().with_clip_rect(clip).text(at, Align2::CENTER_CENTER, shown, font, ink);
+        } else {
+            let ink = if rb.hovered() { crate::theme::lighten(style.accent, 0.25) } else { style.accent };
+            ui.painter().with_clip_rect(body.shrink2(Vec2::new(6.0, 0.0))).text(
+                Pos2::new(body.left() + 8.0, body.center().y), Align2::LEFT_CENTER, shown,
+                FontId::proportional(pal.type_value + 1.0), ink);
+        }
         let tri = Pos2::new(body.right() - 9.0, body.center().y);
         ui.painter().add(egui::Shape::convex_polygon(
             vec![tri + Vec2::new(-3.5, -1.5), tri + Vec2::new(3.5, -1.5), tri + Vec2::new(0.0, 2.5)],

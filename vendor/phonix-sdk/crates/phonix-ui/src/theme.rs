@@ -60,6 +60,11 @@ pub struct Palette {
     /// A screw head, lit and in shade.
     pub screw_lit: Color32,
     pub screw_shade: Color32,
+    /// The preset's nameplate in the header: its face, its rolled edge and
+    /// the ink engraved in it. A transparent face leaves it a well.
+    pub nameplate_face: Color32,
+    pub nameplate_edge: Color32,
+    pub nameplate_ink: Color32,
     /// The type scale in points: a section heading, silkscreen beside a
     /// control, a caption under it, a control's label, a value readout.
     pub type_heading: f32,
@@ -105,6 +110,9 @@ impl Palette {
         cheek_grain: Color32::from_rgba_premultiplied(0, 0, 0, 40),
         screw_lit: Color32::from_rgb(178, 182, 192),
         screw_shade: Color32::from_rgb(92, 96, 106),
+        nameplate_face: Color32::TRANSPARENT,
+        nameplate_edge: Color32::TRANSPARENT,
+        nameplate_ink: Color32::TRANSPARENT,
         type_heading: 9.5,
         type_silk: 9.0,
         type_caption: 8.5,
@@ -445,6 +453,20 @@ pub fn recess(ui: &Ui, rect: Rect, radius: f32) {
     );
 }
 
+/// A plate of rolled metal: dark at its edges, bright across its middle,
+/// with its rim. What the palette's nameplate is struck from.
+pub fn nameplate(ui: &Ui, rect: Rect, radius: f32) {
+    let pal = Palette::of(ui.ctx());
+    cast_shadow(ui, rect, radius as u8, 1.5);
+    let upper = Rect::from_min_max(rect.min, Pos2::new(rect.right(), rect.center().y));
+    let lower = Rect::from_min_max(Pos2::new(rect.left(), rect.center().y), rect.max);
+    let top = CornerRadius { nw: radius as u8, ne: radius as u8, sw: 0, se: 0 };
+    let bottom = CornerRadius { nw: 0, ne: 0, sw: radius as u8, se: radius as u8 };
+    gradient_rounded(ui, upper, top, pal.nameplate_edge, pal.nameplate_face);
+    gradient_rounded(ui, lower, bottom, pal.nameplate_face, pal.nameplate_edge);
+    ui.painter().rect_stroke(rect, radius, Stroke::new(1.0_f32, pal.shade_edge), StrokeKind::Inside);
+}
+
 /// The room behind the instrument: a gradient, darker at its sides.
 pub fn backdrop(ui: &Ui, rect: Rect) {
     let pal = Palette::of(ui.ctx());
@@ -697,6 +719,21 @@ mod tests {
             }
         }
         assert!(!inside(Pos2::new(rect.left() + 0.5, rect.top() + 0.5), 0.0), "a corner is cut");
+    }
+
+    /// Content on a plate takes the width it is given, margins included,
+    /// and no more.
+    #[test]
+    fn a_plate_keeps_to_the_width_it_is_given() {
+        let ctx = egui::Context::default();
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            let r = ui.allocate_ui(Vec2::new(300.0, 200.0), |ui| {
+                ui.set_max_width(300.0);
+                plated(ui, 4, 10, |ui| { ui.label("x"); });
+                ui.min_rect().width()
+            }).inner;
+            assert!(r <= 300.5, "the plate took {r}");
+        });
     }
 
     #[test]

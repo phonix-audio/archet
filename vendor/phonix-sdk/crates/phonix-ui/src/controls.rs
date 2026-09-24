@@ -323,6 +323,11 @@ pub fn flow_stepper(ui: &mut Ui, width: f32, text: &str, salt: impl std::hash::H
 /// A choice among many in a well: the current one shown with a drop mark,
 /// a click opens the list. Returns the index picked from the list.
 pub fn list_well(ui: &mut Ui, rect: Rect, name_: &str, items: &[&str], selected: usize, tint: Color32, salt: impl std::hash::Hash) -> Option<usize> {
+    list_well_response(ui, rect, name_, items, selected, tint, salt).0
+}
+
+/// `list_well`, with the well's response, for a hover note on it.
+pub fn list_well_response(ui: &mut Ui, rect: Rect, name_: &str, items: &[&str], selected: usize, tint: Color32, salt: impl std::hash::Hash) -> (Option<usize>, Response) {
     let pal = Palette::of(ui.ctx());
     let r = ui.interact(rect, ui.id().with(salt), Sense::click());
     let shown = items.get(selected).copied().unwrap_or("").to_string();
@@ -354,7 +359,7 @@ pub fn list_well(ui: &mut Ui, rect: Rect, name_: &str, items: &[&str], selected:
             }
         });
     });
-    out
+    (out, r)
 }
 
 /// A dome for a cap or a knob seen from above, lit from above.

@@ -194,21 +194,26 @@ fn render_tab(
             separator_below: false,
             sections: tab.sections.clone(),
         };
-        render_band(ui, &band, accent, knob, fallback_cols, access, custom);
+        render_band(ui, &band, accent, knob, fallback_cols, None, access, custom);
         return;
     }
-    let total_h = ui.available_height();
+    let total_h = ui.available_height().min(ui.clip_rect().bottom() - ui.cursor().top()).max(1.0);
     let n = tab.bands.len();
     for (i, band) in tab.bands.iter().enumerate() {
         match band.height_frac {
             Some(f) if f > 0.0 && f < 1.0 => {
                 let h = total_h * f;
+                let bottom = ui.cursor().top() + h;
                 ui.allocate_ui(egui::vec2(ui.available_width(), h), |ui| {
-                    render_band(ui, band, accent, knob, fallback_cols, access, custom);
+                    render_band(ui, band, accent, knob, fallback_cols, Some(bottom), access, custom);
                 });
             }
-            // No fraction: take what is needed (or what is left, for the last).
-            _ => render_band(ui, band, accent, knob, fallback_cols, access, custom),
+            // No fraction: what is needed, and the last band reaches down to
+            // the edge the page is clipped at.
+            _ => {
+                let bottom = (i + 1 == n).then(|| ui.clip_rect().bottom() - 2.0);
+                render_band(ui, band, accent, knob, fallback_cols, bottom, access, custom)
+            }
         }
         if band.separator_below && i + 1 < n {
             ui.separator();
@@ -216,12 +221,17 @@ fn render_tab(
     }
 }
 
+/// One band of sections in columns. The last plate of every column is
+/// painted down to the lowest of them, so the band ends on one line; with
+/// `fill_to`, down to that y as well when the content leaves room for it.
+#[allow(clippy::too_many_arguments)]
 fn render_band(
     ui: &mut Ui,
     band: &BandSpec,
     accent: Color32,
     knob: f32,
     fallback_cols: Option<usize>,
+    fill_to: Option<f32>,
     access: &mut dyn PatchAccess,
     custom: &mut CustomTable,
 ) {
@@ -239,50 +249,58 @@ fn render_band(
         by_col[c].push(s);
     }
 
-    // Equal columns unless the band gives proportions. `ui.columns` only ever
-    // divides evenly, so weighted layouts allocate their own strips.
+    // Equal columns unless the band gives proportions. Every column is a
+    // strip at a fixed place, so what one holds never moves another.
     let weights: Vec<f32> = if band.column_weights.len() == ncols
         && band.column_weights.iter().all(|w| *w > 0.0)
     {
         band.column_weights.clone()
     } else {
-        Vec::new()
+        vec![1.0; ncols]
     };
 
-    if weights.is_empty() {
-        ui.columns(ncols, |cols| {
-            for (i, sections) in by_col.iter().enumerate() {
-                for (j, s) in sections.iter().enumerate() {
-                    if j > 0 {
-                        cols[i].add_space(6.0);
-                    }
-                    render_section(&mut cols[i], s, accent, knob, access, custom);
-                }
+    // What the band may divide: the width left before the edge the page is
+    // clipped at, however wide something drawn earlier made the page.
+    let width = (ui.clip_rect().right() - ui.cursor().left()).min(ui.available_width()).max(1.0);
+    let gap = ui.spacing().item_spacing.x.max(6.0);
+    let total: f32 = weights.iter().sum();
+    let avail = (width - gap * (ncols as f32 - 1.0)).max(1.0);
+    let top = ui.cursor().top();
+    let mut x = ui.cursor().left();
+    let mut band_bottom = top;
+    // The plate under the last section of each column, to be lengthened.
+    let mut lasts: Vec<(egui::layers::ShapeIdx, egui::Rect)> = Vec::new();
+    for (i, sections) in by_col.iter().enumerate() {
+        let w = avail * weights[i] / total;
+        let strip = egui::Rect::from_min_size(egui::pos2(x, top), egui::vec2(w, ui.available_height().max(1.0)));
+        let mut col = ui.new_child(egui::UiBuilder::new().max_rect(strip).layout(egui::Layout::top_down(egui::Align::Min)));
+        col.set_max_width(w);
+        for (j, s) in sections.iter().enumerate() {
+            if j > 0 {
+                col.add_space(6.0);
             }
-        });
-    } else {
-        let total: f32 = weights.iter().sum();
-        let gap = 6.0;
-        let avail = (ui.available_width() - gap * (ncols as f32 - 1.0)).max(1.0);
-        let height = ui.available_height();
-        ui.horizontal_top(|ui| {
-            for (i, sections) in by_col.iter().enumerate() {
-                let w = avail * weights[i] / total;
-                ui.allocate_ui(egui::vec2(w, height), |ui| {
-                    ui.set_max_width(w);
-                    ui.vertical(|ui| {
-                        for (j, s) in sections.iter().enumerate() {
-                            if j > 0 { ui.add_space(6.0); }
-                            render_section(ui, s, accent, knob, access, custom);
-                        }
-                    });
-                });
-                if i + 1 < ncols { ui.add_space(gap); }
+            let plate = render_section(&mut col, s, accent, knob, access, custom);
+            if j + 1 == sections.len() {
+                lasts.push(plate);
             }
-        });
+        }
+        band_bottom = band_bottom.max(col.min_rect().bottom());
+        x += w + gap;
+    }
+    ui.allocate_rect(egui::Rect::from_min_max(egui::pos2(ui.cursor().left(), top), egui::pos2(ui.cursor().left() + width, band_bottom)), egui::Sense::hover());
+    let lowest = lasts.iter().map(|(_, r)| r.bottom()).fold(f32::MIN, f32::max);
+    let bottom = match fill_to {
+        Some(b) if b > lowest => b,
+        _ => lowest,
+    };
+    for (under, r) in lasts {
+        let r = egui::Rect::from_min_max(r.min, egui::pos2(r.max.x, bottom));
+        ui.painter().set(under, egui::Shape::Vec(crate::theme::plate_shapes(ui.ctx(), r, egui::CornerRadius::same(4))));
     }
 }
 
+/// A section on its plate. Returns the plate's shape and rect, so a band
+/// can lengthen it.
 fn render_section(
     ui: &mut Ui,
     s: &SectionSpec,
@@ -290,7 +308,7 @@ fn render_section(
     knob: f32,
     access: &mut dyn PatchAccess,
     custom: &mut CustomTable,
-) {
+) -> (egui::layers::ShapeIdx, egui::Rect) {
     let accent = s.accent.map(rgb).unwrap_or(spec_accent);
     let on = cond_holds(&s.enabled_when, access);
     // A header toggle dims its own icon and title, which is how these editors
@@ -298,7 +316,9 @@ fn render_section(
     let toggle_state = s.header_toggle.as_ref().and_then(|f| access.get_bool(f));
     let mut toggled = false;
     if let Some(w) = s.max_width { ui.set_max_width(w); }
-    widgets::panel_frame(ui, |ui| {
+    let under = ui.painter().add(egui::Shape::Noop);
+    let framed = egui::Frame::NONE.inner_margin(widgets::PANEL_MARGIN as i8).show(ui, |ui| {
+        ui.set_min_width(ui.available_width());
         match (s.icon.as_deref().and_then(crate::icons::by_name), toggle_state) {
             (Some((icon, uri)), Some(state)) => {
                 toggled = widgets::panel_header_toggle(ui, icon, uri, &s.title, accent, state);
@@ -323,11 +343,14 @@ fn render_section(
             }
         });
     });
+    let rect = framed.response.rect;
+    ui.painter().set(under, egui::Shape::Vec(crate::theme::plate_shapes(ui.ctx(), rect, egui::CornerRadius::same(4))));
     if toggled {
         if let (Some(field), Some(state)) = (s.header_toggle.as_ref(), toggle_state) {
             access.set_bool(field, !state);
         }
     }
+    (under, rect)
 }
 
 fn render_control(
