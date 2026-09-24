@@ -18,6 +18,7 @@ mod fx;
 use fx::FxLink;
 use phonix_fx::{Chain, ChainSpec, Musical, Transport};
 use phonix_dsp::fader::Fader;
+use phonix_ui::keyboard::BEND_SEMITONES;
 
 use archet::engine::{ArchetCommand, ArchetEngine, ArchetMeterState};
 use archet::patch::{ArchetPatch, Instrument};
@@ -640,7 +641,7 @@ impl Plugin for ArchetPlugin {
                     let _ = tx.send(ArchetCommand::NoteOff(note));
                 }
                 NoteEvent::MidiPitchBend { value, .. } => {
-                    let semitones = (value - 0.5) * 4.0;   // +/-2 semitones
+                    let semitones = (value - 0.5) * 2.0 * BEND_SEMITONES;
                     let _ = tx.send(ArchetCommand::PitchBend(semitones));
                 }
                 NoteEvent::MidiCC { cc: 1, value, .. } => {

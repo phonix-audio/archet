@@ -13,7 +13,7 @@ use archet::{ArchetCommand, ArchetMeterState};
 use phonix_plugin::preset::Preset;
 use phonix_rt::SharedReader;
 use phonix_ui::chrome::{plugin_chrome_panel, PillEntry, PluginChrome};
-use phonix_ui::keyboard::{keyboard_ui, KeyEvent, KeyboardState, KeyboardStyle};
+use phonix_ui::keyboard::{keyboard_ui, KeyEvent, KeyboardState, KeyboardStyle, BEND_SEMITONES};
 use phonix_ui::preset_picker::{NamedPreset, PresetPickerState};
 use phonix_ui::widgets;
 
@@ -294,7 +294,7 @@ impl ArchetApp {
                     let cmd = match ev {
                         KeyEvent::On { note, velocity } => ArchetCommand::NoteOn(note, velocity),
                         KeyEvent::Off { note } => ArchetCommand::NoteOff(note),
-                        KeyEvent::PitchBend(v) => ArchetCommand::PitchBend(v),
+                        KeyEvent::PitchBend(v) => ArchetCommand::PitchBend(v * BEND_SEMITONES),
                         KeyEvent::ModWheel(v) => ArchetCommand::ModWheel(v),
                     };
                     let _ = self.tx.send(cmd);

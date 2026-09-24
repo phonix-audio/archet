@@ -147,6 +147,7 @@ dependencies = [
  "phonix-fx",
  "phonix-plugin",
  "phonix-rt",
+ "phonix-ui",
  "serde_json",
 ]
 
