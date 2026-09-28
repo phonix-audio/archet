@@ -366,4 +366,40 @@ mod tests {
         assert_eq!(n, 4 * 50);
         assert_eq!(after, before, "phrasing allocated {} times", after - before);
     }
+
+    /// The engine renders a section's slurs, bow changes and releases
+    /// without allocating once it has played a chord.
+    #[test]
+    fn slurs_on_a_section_do_not_allocate() {
+        let patch = ArchetPatch::factory_presets().into_iter().find(|p| p.name == "Violin Section").unwrap();
+        let (mut eng, tx, _mr) = ArchetEngine::new_for_plugin(SR);
+        tx.send(ArchetCommand::LoadPatch(Box::new(patch))).unwrap();
+        let mut buf = vec![0.0f32; BLOCK as usize * 2];
+        let mut play = |eng: &mut ArchetEngine, blocks: usize| {
+            let before = ALLOCS.with(|c| c.get());
+            for _ in 0..blocks {
+                eng.process_audio(&mut buf, 2);
+            }
+            ALLOCS.with(|c| c.get()) - before
+        };
+        for n in [62, 66, 69, 74] {
+            tx.send(ArchetCommand::NoteOn(n, 90)).unwrap();
+        }
+        play(&mut eng, 40);
+        for n in [62, 66, 69, 74] {
+            tx.send(ArchetCommand::NoteOff(n)).unwrap();
+        }
+        play(&mut eng, 200);
+        tx.send(ArchetCommand::NoteOn(69, 90)).unwrap();
+        tx.send(ArchetCommand::NoteOn(62, 90)).unwrap();
+        play(&mut eng, 40);
+        let mut n = 0;
+        for cmd in [ArchetCommand::NoteOnLegato(71, 90), ArchetCommand::NoteOff(69), ArchetCommand::NoteOnLegato(64, 90),
+                    ArchetCommand::NoteOff(62), ArchetCommand::NoteOff(64), ArchetCommand::NoteOff(71),
+                    ArchetCommand::BowChange(72, 90), ArchetCommand::NoteOff(72)] {
+            tx.send(cmd).unwrap();
+            n += play(&mut eng, 20);
+        }
+        assert_eq!(n, 0, "the engine allocated {n} times");
+    }
 }

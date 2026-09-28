@@ -59,7 +59,7 @@ pub enum ArchetCommand {
     SetParam { param: ArchetParam, value: f32 },
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default)]
 pub struct ArchetMeterState {
     pub peak_l: f32,
     pub peak_r: f32,
@@ -69,6 +69,37 @@ pub struct ArchetMeterState {
     pub active_notes: Vec<u8>,
     pub cpu_percent: f32,
     pub patch_snapshot: Option<ArchetPatch>,
+    /// Counts the snapshots taken: a copy of the state copies the patch
+    /// only when this differs.
+    pub patch_rev: u64,
+}
+
+impl Clone for ArchetMeterState {
+    fn clone(&self) -> Self {
+        Self {
+            peak_l: self.peak_l,
+            peak_r: self.peak_r,
+            voice_count: self.voice_count,
+            active_notes: self.active_notes.clone(),
+            cpu_percent: self.cpu_percent,
+            patch_snapshot: self.patch_snapshot.clone(),
+            patch_rev: self.patch_rev,
+        }
+    }
+
+    /// Reuses this state's storage: the notes in place, the patch only
+    /// when a new snapshot was taken.
+    fn clone_from(&mut self, src: &Self) {
+        self.peak_l = src.peak_l;
+        self.peak_r = src.peak_r;
+        self.voice_count = src.voice_count;
+        self.active_notes.clone_from(&src.active_notes);
+        self.cpu_percent = src.cpu_percent;
+        if self.patch_rev != src.patch_rev || self.patch_snapshot.is_none() != src.patch_snapshot.is_none() {
+            self.patch_snapshot.clone_from(&src.patch_snapshot);
+            self.patch_rev = src.patch_rev;
+        }
+    }
 }
 
 /// The largest section a patch can ask for: past the voices a note
@@ -127,7 +158,7 @@ impl ArchetEngine {
             pans: Vec::with_capacity(MAX_VOICES),
             bend: 1.0,
             wheel: 0.0,
-            held_keys: Vec::new(),
+            held_keys: Vec::with_capacity(128),
             patch: ArchetPatch::default(),
             command_rx,
             meter_writer,
@@ -335,6 +366,7 @@ impl ArchetEngine {
             self.meter_shadow.active_notes.clone_from(&self.held_keys);
             if self.patch_dirty || self.meter_shadow.patch_snapshot.is_none() {
                 self.meter_shadow.patch_snapshot = Some(self.patch.clone());
+                self.meter_shadow.patch_rev += 1;
                 self.patch_dirty = false;
             }
             let slot = self.meter_writer.edit();
