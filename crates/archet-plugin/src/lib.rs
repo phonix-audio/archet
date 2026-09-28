@@ -15,6 +15,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, RwLock};
 
 mod fx;
+pub mod state;
 use fx::FxLink;
 use phonix_fx::{Chain, ChainSpec, Musical, Transport};
 use phonix_dsp::fader::Fader;

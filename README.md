@@ -107,6 +107,17 @@ The bundle lands in `target/bundled/<platform>/`, laid out as the VST3 spec
 wants. Any host that scans a directory will find it there; for a development
 tree, point the host's search path at it rather than installing.
 
+## A preset as the plugin's state
+
+`archet-state` writes the plugin state that loads a factory preset, with
+fields of its patch overridden, for a project file a host or a script opens:
+the CLAP stream by default, the VST3 one with `--vst3`. `--patch` takes a JSON
+object of the patch's serde field names, dotted for a nested one; a field the
+patch lacks is refused. `--list` prints each preset's category and name,
+`--json` writes the state as a byte array.
+
+    cargo run --release --bin archet-state -- "Cello Solo" --patch '{"vib_depth":20,"release":0.3}' -o cello.state
+
 ## Measuring
 
 The engine carries its measurements as ignored tests under
