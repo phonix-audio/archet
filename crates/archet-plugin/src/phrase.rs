@@ -3,13 +3,15 @@
 //!
 //! With the Legato control at Auto, on a bowed patch, soloist or section:
 //!
-//! - a note-on while exactly one other key is held, pressed alone, slurs
-//!   from it: `NoteOnLegato`, the sounding voice, or each player of the
+//! - a note-on while one or two other keys are held, pressed alone, slurs
+//!   from the held note nearest in pitch, the voice-leading choice when
+//!   two parts share the instrument: `NoteOnLegato`, the sounding voice, or each player of the
 //!   section, carries on to the new pitch and the held key's note-off then
 //!   finds no voice;
 //! - a note-on with no key held, within `TOUCH_S` of the last key coming
 //!   up, is a bow change: `BowChange`, detache without a new attack;
-//! - anything else is a new stroke: `NoteOn`. Keys pressed within
+//! - anything else, a note over three held keys among them, is a new
+//!   stroke: `NoteOn`. Keys pressed within
 //!   `CHORD_S` of each other are a chord, each its own bow.
 //!
 //! At Off, or on a plucked patch, every note-on is `NoteOn`.
@@ -127,7 +129,7 @@ impl Phrasing {
                 let key = usize::from(note & 0x7f);
                 let lone = self.last_on.is_none_or(|on| t.saturating_sub(on) >= self.chord);
                 let phrased = self.auto && self.bowed;
-                let cmd = if phrased && self.held_count == 1 && !self.held[key] && lone {
+                let cmd = if phrased && (1..=2).contains(&self.held_count) && !self.held[key] && lone {
                     ArchetCommand::NoteOnLegato(note, vel)
                 } else if phrased
                     && self.held_count == 0
@@ -216,11 +218,23 @@ mod tests {
         assert_eq!(phrase(true, true, &ev), ["on", "on", "on", "off", "off", "off"]);
     }
 
-    /// A note played against two held keys has no one voice to slur from.
+    /// A note played against two held keys, a divided line, slurs; against
+    /// three it is a new bow.
     #[test]
-    fn a_note_over_a_held_chord_is_a_new_bow() {
-        let ev = [(0.0, Midi::On(62, 100)), (0.0, Midi::On(69, 100)), (0.4, Midi::On(74, 100))];
-        assert_eq!(phrase(true, true, &ev), ["on", "on", "on"]);
+    fn a_divided_line_slurs_and_a_chord_does_not() {
+        let two = [(0.0, Midi::On(62, 100)), (0.0, Midi::On(69, 100)), (0.4, Midi::On(71, 100))];
+        assert_eq!(phrase(true, true, &two), ["on", "on", "slur"]);
+        let three = [(0.0, Midi::On(62, 100)), (0.0, Midi::On(66, 100)), (0.0, Midi::On(69, 100)), (0.4, Midi::On(74, 100))];
+        assert_eq!(phrase(true, true, &three), ["on", "on", "on", "on"]);
+    }
+
+    /// In a divided line the upper part moves from 69 to 71 while 62 holds:
+    /// the two voices carry on, and nothing is attacked again.
+    #[test]
+    fn a_divided_line_moves_one_part() {
+        let ev = [(0.0, Midi::On(62, 100)), (0.0, Midi::On(69, 100)), (0.5, Midi::On(71, 100)), (0.52, Midi::Off(69))];
+        assert_eq!(render(true, &ev, 0.54).1, 2, "the moving part re-attacked");
+        assert_eq!(render(false, &ev, 0.54).1, 3, "off did not re-attack");
     }
 
     /// Back to back at one instant: the release goes first even when the
@@ -328,18 +342,20 @@ mod tests {
     }
 
     /// The Legato control at its two ends, in the contexts it acts in: a
-    /// slur and a bow change. The renders differ sample by sample, or the
+    /// slur and a bow change, on a soloist and on a section. The renders differ sample by sample, or the
     /// control is inert.
     ///   cargo test --release -p archet-plugin legato_audit -- --ignored --nocapture
     #[test]
     #[ignore = "diagnostic - run with --ignored"]
     fn legato_audit() {
-        for (name, events) in [("slur", &OVERLAP), ("bow change", &TOUCH)] {
-            let (auto, _) = render(true, events, 1.0);
-            let (off, _) = render(false, events, 1.0);
-            let most = auto.iter().zip(&off).fold(0.0f32, |m, (a, b)| m.max((a - b).abs()));
-            println!("  legato in a {name:<10} largest difference {most:.4}");
-            assert!(most > 1e-4, "legato is inert in a {name}");
+        for patch in ["Violin Solo", "Violin Section"] {
+            for (name, events) in [("slur", &OVERLAP), ("bow change", &TOUCH)] {
+                let (auto, _) = render_on(patch, true, events, 1.0);
+                let (off, _) = render_on(patch, false, events, 1.0);
+                let most = auto.iter().zip(&off).fold(0.0f32, |m, (a, b)| m.max((a - b).abs()));
+                println!("  {patch:<14} legato in a {name:<10} largest difference {most:.4}");
+                assert!(most > 1e-4, "legato is inert in a {name} on {patch}");
+            }
         }
     }
 

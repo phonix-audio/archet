@@ -100,9 +100,9 @@ a measurement, and what has been tried.
 
 ## Plugin
 
-- Live legato (2026-09-28): a note over two held keys is a new stroke.
-- The keys are read per block, at the host's event timing; the chord and
-  touch windows (30 ms, 10 ms) are fixed, not controls.
+- Live legato (2026-09-28): the keys are read per block, at the host's
+  event timing; the chord and touch windows (30 ms, 10 ms) are fixed,
+  not controls.
 
 - A section is no louder than a soloist on the engine's scale: the
   microphone stands back as the section grows, and the growth of level

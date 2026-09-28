@@ -54,9 +54,15 @@ keys as a string player phrases, on a bowed soloist or section:
 | Keys | Stroke |
 |------|--------|
 | The next key goes down while one key is still held | Slur: the same bow, the finger moves to the new pitch |
+| The next key goes down while two keys are held | Slur from the held note nearest in pitch; the other holds |
 | The next key goes down as the last one comes up, within 10 ms | Bow change: the bow turns without a new attack |
 | A gap between the keys | A new stroke |
 | Keys down within 30 ms of each other | A chord: each note its own bow |
+| The next key goes down while three or more keys are held | A new stroke |
+
+Two held keys are a divided line, a double stop or two parts on one
+instance: the next note continues the part nearest to it in pitch, the
+choice voice leading makes, and the other part sustains.
 
 From a keyboard, play legato: hold each key until the next is down. In a
 DAW, lengthen each note of a slur so it overlaps the next by a few
