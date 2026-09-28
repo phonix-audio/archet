@@ -224,6 +224,10 @@ pub struct ArchetVoice {
     release_delay: i32, // samples until this player lifts the bow (-1 = none);
                         // staggers a section's note-offs (bows lift apart)
     drift: f32,         // slewed slow random-walk pitch drift (raw, ~+/-0.003)
+    /// A section player's slur or bow change waiting for its moment:
+    /// (note, velocity, bow change), applied when `cont_delay` runs out.
+    cont_pending: Option<(u8, u8, bool)>,
+    cont_delay: usize,
 
     // activity tracking
     energy: f32,
@@ -338,6 +342,8 @@ impl ArchetVoice {
             onset_delay: 0,
             release_delay: -1,
             drift: drift0,
+            cont_pending: None,
+            cont_delay: 0,
             note_time: 0.0,
             energy: 0.0,
             stealing: false,
@@ -431,6 +437,12 @@ impl ArchetVoice {
     #[cfg(test)]
     pub(crate) fn unison_det(&self) -> f32 {
         self.unison_det
+    }
+
+    /// Whether a slur or bow change is waiting for this player's moment.
+    #[cfg(test)]
+    pub(crate) fn continuing(&self) -> bool {
+        self.cont_pending.is_some()
     }
 
     pub fn set_unison(&mut self, det_cents: f32, pan: f32, onset_delay: usize) {
@@ -787,6 +799,7 @@ impl ArchetVoice {
         self.vel = v;
         self.note = Some(note);
         self.release_delay = -1; // fresh/retriggered note: cancel any pending lift
+        self.cont_pending = None;
         self.inst_idx = Self::inst_for(note, patch);
         self.releasing = false;
         self.amp_env = 0.0; // start silent -> the bow attack ramps the loudness in
@@ -945,6 +958,26 @@ impl ArchetVoice {
     /// and only the finger changes pitch. freq_hz glides to the new pitch
     /// rather than jumping (an abrupt retune is Jaffe and Smith's spurious
     /// pluck); the amplitude and the bow direction continue.
+    /// Continue this voice's stroke on `note`: a slur, or a bow change when
+    /// `change`, `delay` samples from now. The voice answers to `note` at
+    /// once, so its note-off pairs with it even before the stroke moves.
+    pub fn continue_stroke(&mut self, note: u8, vel: u8, change: bool, delay: usize, patch: &ArchetPatch) {
+        if delay == 0 {
+            self.cont_pending = None;
+            if change {
+                self.bow_change(note, vel, patch);
+            } else {
+                self.note_on_legato(note, vel, patch);
+            }
+        } else {
+            self.note = Some(note);
+            self.releasing = false;
+            self.release_delay = -1;
+            self.cont_pending = Some((note, vel, change));
+            self.cont_delay = delay;
+        }
+    }
+
     pub fn note_on_legato(&mut self, note: u8, vel: u8, patch: &ArchetPatch) {
         let v = (vel as f32 / 127.0).clamp(0.0, 1.0);
         self.vel = v;
@@ -956,7 +989,8 @@ impl ArchetVoice {
         self.apply_expression(note, v, patch);
         self.bow_dir = keep_dir;
         self.bow_vel_target *= self.bow_dir;
-        self.freq_target = Self::freq_tuned(note, patch); // glide target (ramped in process)
+        // glide target (ramped in process), on this player's seat detune
+        self.freq_target = Self::freq_tuned(note, patch) * 2f32.powf(self.unison_det / 1200.0);
         self.modal_pitch_gain = Self::modal_pgain(self.freq_target) * Self::inst_level(self.inst_idx);
     }
 
@@ -976,7 +1010,8 @@ impl ArchetVoice {
         self.bow_vel_target *= self.bow_dir;     // bow_vel ramps through zero
         self.force_dip = 0.18;                   // force drops at the change, then ramps back to 1
         self.note_time = 0.0;                    // re-fire the bow-grip noise burst (detache attack)
-        self.freq_hz = Self::freq_tuned(note, patch); // detache: clean re-pitch (separate note)
+        // detache: clean re-pitch (separate note), on this player's seat detune
+        self.freq_hz = Self::freq_tuned(note, patch) * 2f32.powf(self.unison_det / 1200.0);
         self.freq_target = self.freq_hz;
         self.modal_pitch_gain = Self::modal_pgain(self.freq_hz) * Self::inst_level(self.inst_idx);
         {
@@ -992,6 +1027,7 @@ impl ArchetVoice {
         // started sounding - cancel the pending attack (the fade keeps
         // running to zero, then the voice silences; see process()).
         self.steal_pending = None;
+        self.cont_pending = None;
         // The release control is in seconds and a bow's release is a
         // per-sample modal decay, so one is derived from the other at every
         // note-off. A plucked string is untouched: `process` returns on that
@@ -1076,6 +1112,21 @@ impl ArchetVoice {
         if self.onset_delay > 0 {
             self.onset_delay -= 1;
             return 0.0;
+        }
+        // A section player's slur or bow change lands at its own moment.
+        if let Some((note, vel, change)) = self.cont_pending {
+            if self.cont_delay == 0 {
+                self.cont_pending = None;
+                let lift = self.release_delay;
+                if change {
+                    self.bow_change(note, vel, patch);
+                } else {
+                    self.note_on_legato(note, vel, patch);
+                }
+                self.release_delay = lift;
+            } else {
+                self.cont_delay -= 1;
+            }
         }
         // staggered bow lift (section release asynchrony)
         if self.release_delay >= 0 {

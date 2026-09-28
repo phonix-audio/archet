@@ -22,6 +22,9 @@ use super::voice::{ArchetVoice, MAX_VOICES, SCRATCH_FRAMES};
 const PHYS_CAP: usize = 8;
 /// Physical voices a plucked section lights per note.
 const PLUCK_CAP: usize = 4;
+/// The spread, in seconds, over which a section's players move their
+/// fingers in a slur or turn their bows in a bow change.
+const CONTINUE_SPREAD_S: f32 = 0.020;
 
 /// A 32-bit finaliser (MurmurHash3's), so every bit of a small seat
 /// number reaches every bit drawn from it.
@@ -376,43 +379,8 @@ impl ArchetEngine {
                         self.voices[idx].on_seq = seq;
                     }
                 }
-                ArchetCommand::NoteOnLegato(note, vel) => {
-                    // Retune the loudest still-sounding voice (the bow that is
-                    // down, even if just released), so the slur continues. Every
-                    // note still gets a NoteOff, so no voice is held forever. No
-                    // sounding voice:
-                    // a fresh bow stroke.
-                    let poly = self.pool();
-                    let best = (0..poly)
-                        .filter(|&i| self.voices[i].is_active() && self.voices[i].level() > 1e-4)
-                        .max_by(|&a, &b| self.voices[a].level().partial_cmp(&self.voices[b].level()).unwrap());
-                    self.note_seq += 1;
-                    if let Some(i) = best {
-                        self.voices[i].note_on_legato(note, vel, &self.patch);
-                        self.voices[i].on_seq = self.note_seq;
-                    } else {
-                        let idx = self.allocate_voice_idx(note);
-                        self.voices[idx].note_on(note, vel, &self.patch);
-                        self.voices[idx].on_seq = self.note_seq;
-                    }
-                }
-                ArchetCommand::BowChange(note, vel) => {
-                    // Detache: reverse the bow on the still-bowing voice (no lift -> no
-                    // pluck). Same voice-selection as legato; fresh stroke if none down.
-                    let poly = self.pool();
-                    let best = (0..poly)
-                        .filter(|&i| self.voices[i].is_active() && self.voices[i].level() > 1e-4)
-                        .max_by(|&a, &b| self.voices[a].level().partial_cmp(&self.voices[b].level()).unwrap());
-                    self.note_seq += 1;
-                    if let Some(i) = best {
-                        self.voices[i].bow_change(note, vel, &self.patch);
-                        self.voices[i].on_seq = self.note_seq;
-                    } else {
-                        let idx = self.allocate_voice_idx(note);
-                        self.voices[idx].note_on(note, vel, &self.patch);
-                        self.voices[idx].on_seq = self.note_seq;
-                    }
-                }
+                ArchetCommand::NoteOnLegato(note, vel) => self.continue_stroke(note, vel, false),
+                ArchetCommand::BowChange(note, vel) => self.continue_stroke(note, vel, true),
                 ArchetCommand::NoteOff(note) => {
                     self.held_keys.retain(|&x| x != note);
                     // Release the oldest held cluster of this pitch (one off pairs
@@ -515,6 +483,65 @@ impl ArchetEngine {
             let off = self.patch.seed_offset;
             for v in &mut self.voices { v.reseed(off); }
             self.applied_seed = off;
+        }
+    }
+
+    /// The stroke a slur or a bow change onto `note` continues, as the
+    /// `on_seq` its players share: of the notes whose keys are held, the
+    /// nearest in pitch (the voice-leading choice in a divided line), the
+    /// latest of equals; with no key held, the latest note still sounding.
+    fn stroke_to_continue(&self, note: u8) -> Option<u64> {
+        let voices = &self.voices[..self.pool()];
+        let held = voices
+            .iter()
+            .filter(|v| !v.is_releasing())
+            .filter_map(|v| v.note.filter(|n| *n != note && self.held_keys.contains(n)).map(|n| (n, v.on_seq)))
+            .min_by_key(|&(n, seq)| (n.abs_diff(note), std::cmp::Reverse(seq)))
+            .map(|(_, seq)| seq);
+        held.or_else(|| {
+            voices
+                .iter()
+                .filter(|v| v.is_active() && v.level() > 1e-4)
+                .map(|v| v.on_seq)
+                .max()
+        })
+    }
+
+    /// A slur (`change` false) or a detache bow change onto `note`: every
+    /// player of the continued stroke carries on to it, the first at once
+    /// and each other at its own moment within `CONTINUE_SPREAD_S`, on its
+    /// own seat's intonation. Every note still gets its note-off, so no
+    /// voice is held forever. With no stroke to continue, a fresh one.
+    fn continue_stroke(&mut self, note: u8, vel: u8, change: bool) {
+        if !self.held_keys.contains(&note) { self.held_keys.push(note); }
+        self.note_seq += 1;
+        let seq = self.note_seq;
+        let Some(from) = self.stroke_to_continue(note) else {
+            if self.patch.ensemble >= 1.5 {
+                self.fire_unison(note, vel, seq);
+            } else {
+                let idx = self.allocate_voice_idx(note);
+                self.voices[idx].set_unison(0.0, 0.0, 0);
+                self.voices[idx].note_on(note, vel, &self.patch);
+                self.voices[idx].on_seq = seq;
+            }
+            return;
+        };
+        let spread = ((CONTINUE_SPREAD_S * self.sample_rate) as u32).max(1);
+        let pool = self.pool();
+        let mut k = 0u32;
+        for v in self.voices[..pool].iter_mut() {
+            if v.on_seq != from || !v.is_active() {
+                continue;
+            }
+            let event = (note as u32)
+                .wrapping_mul(2654435761)
+                .wrapping_add(k.wrapping_mul(40503))
+                .wrapping_add(seq as u32);
+            let delay = if k == 0 { 0 } else { ((event >> 5) % spread) as usize };
+            v.continue_stroke(note, vel, change, delay, &self.patch);
+            v.on_seq = seq;
+            k += 1;
         }
     }
 
@@ -3121,5 +3148,142 @@ mod wheels {
             let ratio = pitch_of(p.clone(), 2.0) / pitch_of(p, 0.0);
             assert!((ratio / want - 1.0).abs() < 0.03, "{name}: bend ratio {ratio:.3}, want {want:.3}");
         }
+    }
+}
+
+/// Slurs and bow changes continue the stroke of the held note they leave:
+/// its voice, or every player of its section, carries on without a new
+/// attack.
+#[cfg(test)]
+mod continuation {
+    use super::*;
+
+    const SR: f32 = 48_000.0;
+
+    fn engine(name: &str) -> (ArchetEngine, mpsc::Sender<ArchetCommand>) {
+        let patch = ArchetPatch::factory_presets().into_iter().find(|p| p.name == name).unwrap();
+        let (mut eng, tx, _mr) = ArchetEngine::new_for_plugin(SR);
+        tx.send(ArchetCommand::LoadPatch(Box::new(patch))).unwrap();
+        run(&mut eng, 0.01);
+        (eng, tx)
+    }
+
+    fn run(eng: &mut ArchetEngine, secs: f32) {
+        let mut buf = vec![0.0f32; 256 * 2];
+        for _ in 0..(secs * SR / 256.0).ceil() as usize {
+            eng.process_audio(&mut buf, 2);
+        }
+    }
+
+    /// The voices sounding `note`.
+    fn on(eng: &ArchetEngine, note: u8) -> Vec<usize> {
+        (0..eng.voices.len()).filter(|&i| eng.voices[i].note == Some(note)).collect()
+    }
+
+    fn active(eng: &ArchetEngine) -> usize {
+        eng.voices.iter().filter(|v| v.is_active()).count()
+    }
+
+    /// A loud note released and ringing, a soft one held: the slur takes
+    /// the held note's voice, not the loudest, and that voice keeps its
+    /// level through the change.
+    #[test]
+    fn a_slur_continues_the_held_note_not_the_loudest() {
+        let (mut eng, tx) = engine("Violin Solo");
+        tx.send(ArchetCommand::NoteOn(76, 127)).unwrap();
+        run(&mut eng, 0.4);
+        tx.send(ArchetCommand::NoteOn(69, 40)).unwrap();
+        run(&mut eng, 0.3);
+        tx.send(ArchetCommand::NoteOff(76)).unwrap();
+        run(&mut eng, 0.01);
+        let held = on(&eng, 69);
+        assert_eq!(held.len(), 1);
+        let loud = eng.voices.iter().filter(|v| v.is_releasing() && v.is_active()).map(|v| v.level()).fold(0.0, f32::max);
+        assert!(loud > eng.voices[held[0]].level(), "the released note is not the louder");
+        let before = eng.voices[held[0]].level();
+        let count = active(&eng);
+        tx.send(ArchetCommand::NoteOnLegato(71, 40)).unwrap();
+        run(&mut eng, 0.01);
+        assert_eq!(on(&eng, 71), held, "the slur left the held note's voice");
+        assert_eq!(active(&eng), count, "the slur lit a voice");
+        let after = eng.voices[held[0]].level();
+        assert!(after > before * 0.5, "the slur re-attacked: level {before} to {after}");
+    }
+
+    /// A bow change with no key held turns the latest note's bow.
+    #[test]
+    fn a_bow_change_continues_the_latest_note() {
+        let (mut eng, tx) = engine("Violin Solo");
+        tx.send(ArchetCommand::NoteOn(76, 127)).unwrap();
+        run(&mut eng, 0.3);
+        tx.send(ArchetCommand::NoteOff(76)).unwrap();
+        tx.send(ArchetCommand::NoteOn(69, 60)).unwrap();
+        run(&mut eng, 0.3);
+        let last = on(&eng, 69);
+        tx.send(ArchetCommand::NoteOff(69)).unwrap();
+        tx.send(ArchetCommand::BowChange(71, 60)).unwrap();
+        run(&mut eng, 0.01);
+        assert_eq!(on(&eng, 71), last, "the bow change left the latest note's voice");
+    }
+
+    /// Two held notes, a divided line: a slur leaves the nearer in pitch
+    /// and the other holds.
+    #[test]
+    fn a_slur_leaves_the_nearest_held_note() {
+        for (to, from, stays) in [(71u8, 69u8, 62u8), (64, 62, 69)] {
+            let (mut eng, tx) = engine("Violin Solo");
+            tx.send(ArchetCommand::NoteOn(62, 90)).unwrap();
+            tx.send(ArchetCommand::NoteOn(69, 90)).unwrap();
+            run(&mut eng, 0.3);
+            let (voice, other) = (on(&eng, from), on(&eng, stays));
+            tx.send(ArchetCommand::NoteOnLegato(to, 90)).unwrap();
+            run(&mut eng, 0.01);
+            assert_eq!(on(&eng, to), voice, "{to} did not leave {from}");
+            assert_eq!(on(&eng, stays), other, "{stays} moved");
+            assert_eq!(active(&eng), 2);
+        }
+    }
+
+    /// On a section every player slurs on its own voice, at its own
+    /// moment within the spread, keeping its seat's intonation; nothing
+    /// is attacked again.
+    #[test]
+    fn a_section_slurs_on_every_player() {
+        for change in [false, true] {
+            let (mut eng, tx) = engine("Violin Section");
+            tx.send(ArchetCommand::NoteOn(69, 90)).unwrap();
+            run(&mut eng, 0.4);
+            let players = on(&eng, 69);
+            assert!(players.len() > 1, "the section lit one voice");
+            let count = active(&eng);
+            if change {
+                tx.send(ArchetCommand::NoteOff(69)).unwrap();
+                tx.send(ArchetCommand::BowChange(71, 90)).unwrap();
+            } else {
+                tx.send(ArchetCommand::NoteOnLegato(71, 90)).unwrap();
+            }
+            eng.process_commands();
+            assert_eq!(on(&eng, 71), players, "a player did not continue");
+            let waiting = players.iter().filter(|&&i| eng.voices[i].continuing()).count();
+            assert!(!eng.voices[players[0]].continuing() && waiting > 0, "the players moved together");
+            run(&mut eng, CONTINUE_SPREAD_S + 0.2);
+            assert_eq!(active(&eng), count, "the section lit voices");
+            assert!(players.iter().all(|&i| !eng.voices[i].continuing() && eng.voices[i].level() > 1e-4));
+            let f: Vec<f32> = players.iter().map(|&i| eng.voices[i].frequency()).collect();
+            let hi = f.iter().fold(0.0f32, |m, &x| m.max(x));
+            let lo = f.iter().fold(f32::MAX, |m, &x| m.min(x));
+            assert!(1200.0 * (hi / lo).log2() > 5.0, "the seats lost their intonation");
+            let tuned = 440.0 * 2f32.powf(2.0 / 12.0);
+            assert!(f.iter().all(|&x| (1200.0 * (x / tuned).log2()).abs() < 80.0), "a player is off the new pitch");
+        }
+    }
+
+    /// A slur with nothing sounding is a fresh stroke on every player.
+    #[test]
+    fn a_slur_from_silence_attacks() {
+        let (mut eng, tx) = engine("Violin Section");
+        tx.send(ArchetCommand::NoteOnLegato(71, 90)).unwrap();
+        run(&mut eng, 0.1);
+        assert!(on(&eng, 71).len() > 1);
     }
 }
