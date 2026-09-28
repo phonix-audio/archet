@@ -139,6 +139,16 @@ pub fn player_knob(band: Rect, row: usize, i: usize) -> Pos2 {
     )
 }
 
+/// The legato switch, on the player's second row after its two knobs,
+/// level with their knobs' centres; its caption runs under it.
+pub fn legato_switch(band: Rect) -> Rect {
+    let at = player_knob(band, 1, 2);
+    Rect::from_min_size(
+        Pos2::new(at.x + CELL * 0.25, at.y + KNOB * 0.5 - 10.0),
+        Vec2::new(2.5 * CELL, 20.0),
+    )
+}
+
 /// The section's own controls sit at the right end, away from the player's.
 pub fn section_knob(band: Rect, i: usize) -> Pos2 {
     Pos2::new(band.right() - 3.0 * CELL + i as f32 * CELL, band.top() + 20.0)
@@ -241,6 +251,10 @@ mod tests {
         }
         assert!(player_knob(player, 0, 4).x + CELL <= section_knob(player, 0).x,
                 "the player's knobs run into the section's");
+        let legato = legato_switch(player);
+        assert!(player.contains_rect(legato.expand2(Vec2::new(0.0, 16.0))), "the legato switch or its caption leaves the tier");
+        assert!(player_knob(player, 1, 1).x + CELL <= legato.left(), "the legato switch runs into the knobs");
+        assert!(legato.right() <= section_knob(player, 0).x, "the legato switch runs into the section");
     }
 
     /// The bow's position inverts, so it stays under the hand that dragged

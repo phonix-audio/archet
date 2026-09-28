@@ -15,8 +15,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, RwLock};
 
 mod fx;
+pub mod phrase;
 pub mod state;
 use fx::FxLink;
+use phrase::{Midi, Phrasing};
 use phonix_fx::{Chain, ChainSpec, Musical, Transport};
 use phonix_dsp::fader::Fader;
 use phonix_ui::keyboard::BEND_SEMITONES;
@@ -52,6 +54,18 @@ pub struct ArchetPlugin {
     /// Snapshot of the Init-mode param values last pushed, so we only rebuild +
     /// LoadPatch when something changed (no per-block heap allocation at idle).
     last_init_sig:   Option<[f32; INIT_SIG_LEN]>,
+    /// MIDI to strokes: new bow, slur or bow change. `None` until
+    /// `initialize` knows the sample rate and the block size.
+    phrasing:        Option<Phrasing>,
+    /// Whether the loaded patch plucks, and whether it plays a section:
+    /// taken from a preset when one loads and from the host parameters
+    /// when they move.
+    pluck:           bool,
+    section:         bool,
+    /// The articulation and ensemble host values last seen, so a move of
+    /// either is told from a preset that left them where they were.
+    seen_art:        i32,
+    seen_ens:        f32,
 }
 
 const INIT_SIG_LEN: usize = 19;
@@ -111,6 +125,11 @@ impl Default for ArchetPlugin {
             fx_link:         Arc::new(FxLink::new(ChainSpec::default())),
             fx_seen:         0,
             last_init_sig:   None,
+            phrasing:        None,
+            pluck:           false,
+            section:         false,
+            seen_art:        -1,
+            seen_ens:        -1.0,
         }
     }
 }
@@ -183,6 +202,10 @@ struct ArchetParams {
     ensemble: FloatParam,
     #[id = "tune_cents"]
     tune_cents: FloatParam,
+
+    // Phrasing
+    #[id = "legato"]
+    legato: IntParam,         // 0 = Off, 1 = Auto
 }
 
 impl ArchetParams {
@@ -262,6 +285,9 @@ impl ArchetParams {
                 .with_value_to_string(formatters::v2s_f32_rounded(0)),
             tune_cents: FloatParam::new("Tune", 0.0, FloatRange::Linear { min: -50.0, max: 50.0 })
                 .with_unit(" ct").with_value_to_string(formatters::v2s_f32_rounded(1)),
+
+            legato: IntParam::new("Legato", 1, IntRange::Linear { min: 0, max: 1 })
+                .with_value_to_string(Arc::new(|v| if v == 0 { "Off".into() } else { "Auto".into() })),
         }
     }
 
@@ -489,7 +515,15 @@ impl Plugin for ArchetPlugin {
                     app.set_fx(spec);
                     seen.store(seen_now, Ordering::Relaxed);
                 }
+                app.set_legato(host_params.legato.value() != 0);
                 app.draw_ui(ui);
+                // The legato switch is a host parameter only: the window
+                // asks, the parameter moves, the audio thread reads it.
+                if let Some(on) = app.take_wants_legato() {
+                    setter.begin_set_parameter(&host_params.legato);
+                    setter.set_parameter(&host_params.legato, i32::from(on));
+                    setter.end_set_parameter(&host_params.legato);
+                }
                 // The page moved something: publish it, and the audio thread
                 // takes it on its next block.
                 if app.take_fx_changed() {
@@ -549,6 +583,7 @@ impl Plugin for ArchetPlugin {
             None => self.fx_chain = Some(Chain::new(sr, max_block)),
         }
         self.fader = Some(Fader::new(sr, archet::engine::LOWEST_HZ));
+        self.phrasing = Some(Phrasing::new(sr, max_block));
 
         let patch = self.params.patch_state.read().map(|p| p.clone()).unwrap_or_default();
         // A restored project brings its chain with it, inside the patch; one
@@ -560,6 +595,10 @@ impl Plugin for ArchetPlugin {
         }
         self.fx_link.seed(patch.fx.clone());
         self.fx_seen = self.fx_link.rev();
+        self.pluck = patch.pluck;
+        self.section = patch.is_section();
+        self.seen_art = self.params.articulation.value();
+        self.seen_ens = self.params.ensemble.value();
         let _ = self.command_tx.send(ArchetCommand::LoadPatch(Box::new(patch)));
         self.last_preset = self.params.preset.value();
         self.last_init_sig = None;
@@ -588,6 +627,8 @@ impl Plugin for ArchetPlugin {
                 let idx = (current_preset - 1) as usize;
                 if let Some(patch) = self.factory_presets.get(idx) {
                     let _ = tx.send(ArchetCommand::LoadPatch(Box::new(patch.clone())));
+                    self.pluck = patch.pluck;
+                    self.section = patch.is_section();
                     // The preset's own chain, from the bank rather than from
                     // the editor: this branch also fires on host automation.
                     if let Some(c) = self.fx_chain.as_mut() {
@@ -632,24 +673,36 @@ impl Plugin for ArchetPlugin {
         }
 
         // -- MIDI events --
-        while let Some(event) = context.next_event() {
-            match event {
-                NoteEvent::NoteOn { note, velocity, .. } => {
-                    let vel = (velocity * 127.0) as u8;
-                    let _ = tx.send(ArchetCommand::NoteOn(note, vel));
+        // A move of the articulation or the ensemble parameter, from the
+        // host or from the window, is what the engine now plays.
+        let (art, ens) = (self.params.articulation.value(), self.params.ensemble.value());
+        if art != self.seen_art {
+            self.seen_art = art;
+            self.pluck = art != 0;
+        }
+        if ens != self.seen_ens {
+            self.seen_ens = ens;
+            self.section = ArchetPatch::section_of(ens);
+        }
+        let frames = buffer.samples() as u32;
+        if let Some(p) = self.phrasing.as_mut() {
+            p.set_mode(self.params.legato.value() != 0, !self.pluck && !self.section);
+            let mut emit = |c: ArchetCommand| { let _ = tx.send(c); };
+            while let Some(event) = context.next_event() {
+                let midi = match event {
+                    NoteEvent::NoteOn { timing, note, velocity, .. } => Some((timing, Midi::On(note, (velocity * 127.0) as u8))),
+                    NoteEvent::NoteOff { timing, note, .. } => Some((timing, Midi::Off(note))),
+                    NoteEvent::MidiPitchBend { timing, value, .. } => {
+                        Some((timing, Midi::Bend((value - 0.5) * 2.0 * BEND_SEMITONES)))
+                    }
+                    NoteEvent::MidiCC { timing, cc: 1, value, .. } => Some((timing, Midi::Wheel(value))),
+                    _ => None,
+                };
+                if let Some((timing, m)) = midi {
+                    p.push(timing, m, &mut emit);
                 }
-                NoteEvent::NoteOff { note, .. } => {
-                    let _ = tx.send(ArchetCommand::NoteOff(note));
-                }
-                NoteEvent::MidiPitchBend { value, .. } => {
-                    let semitones = (value - 0.5) * 2.0 * BEND_SEMITONES;
-                    let _ = tx.send(ArchetCommand::PitchBend(semitones));
-                }
-                NoteEvent::MidiCC { cc: 1, value, .. } => {
-                    let _ = tx.send(ArchetCommand::ModWheel(value));
-                }
-                _ => {}
             }
+            p.end_block(frames, &mut emit);
         }
 
         // -- Audio --
@@ -746,6 +799,18 @@ mod frozen_identifiers {
     #[test]
     fn the_vstpreset_writer_uses_the_plugins_class_id() {
         assert_eq!(b"PxArchetBow00001", &<ArchetPlugin as Vst3Plugin>::VST3_CLASS_ID);
+    }
+
+    /// The Legato parameter's id, range and default are wire format: a
+    /// host stores automation against the id.
+    #[test]
+    fn the_legato_parameter_is_frozen() {
+        let p = ArchetParams::default();
+        let map = p.param_map();
+        let (_, ptr, _) = map.iter().find(|(id, _, _)| id == "legato").expect("no legato id");
+        assert_eq!(unsafe { ptr.step_count() }, Some(1));
+        assert_eq!(unsafe { ptr.default_normalized_value() }, 1.0, "Auto is the default");
+        assert_eq!(unsafe { ptr.name() }, "Legato");
     }
 
     /// The window the plugin declares is the one the editor is laid out

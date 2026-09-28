@@ -397,6 +397,17 @@ impl ArchetPatch {
             self.instrument.range()
         }
     }
+
+    /// Whether the patch plays a section: two players or more, where the
+    /// engine fires a unison cluster per note.
+    pub fn is_section(&self) -> bool {
+        Self::section_of(self.ensemble)
+    }
+
+    /// Whether an ensemble size is a section.
+    pub fn section_of(ensemble: f32) -> bool {
+        ensemble >= 1.5
+    }
 }
 
 impl phonix_plugin::preset::Preset for ArchetPatch {

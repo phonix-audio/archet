@@ -100,6 +100,15 @@ a measurement, and what has been tried.
 
 ## Plugin
 
+- Live legato (2026-09-28): the engine slurs and turns the bow on its
+  loudest sounding voice, not on the voice of the key held. With one key
+  held that is the held note's, unless an earlier note's release is still
+  louder than its attack. A note over two held keys is a new stroke. A
+  section re-attacks every note: the engine's slur moves one player of the
+  unison cluster, so the plugin sends a section new strokes only.
+- The keys are read per block, at the host's event timing; the chord and
+  touch windows (30 ms, 10 ms) are fixed, not controls.
+
 - A section is no louder than a soloist on the engine's scale: the
   microphone stands back as the section grows, and the growth of level
   with players a listener in the hall hears is not rendered. The fader

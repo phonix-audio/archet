@@ -23,8 +23,8 @@ Three bands. The bow: where it crosses the string, from sul tasto to sul
 ponticello, how hard and how fast, with the friction model and the noise
 and damping of the stroke. The body: which of the four, its response with
 the bridge hill drawn, and the torsion under it. The player: attack and
-release, the vibrato, the dynamics, the size of the section, the
-polyphony, the level.
+release, the vibrato, the dynamics, how the keys phrase, the size of the
+section, the polyphony, the level.
 The keyboard below plays it, and underlines the notes the instrument
 plays: outside them the model is asked for a note the real instrument
 has no string for.
@@ -45,6 +45,25 @@ them is the player's.
 
 `scripts/screenshots.sh` renders these headless from the editor's own
 snapshot tests and `--check` fails when the pictures fall behind it.
+
+## Playing legato
+
+The Legato switch on the player's band, a host parameter, reads the
+keys as a string player phrases, on a bowed soloist:
+
+| Keys | Stroke |
+|------|--------|
+| The next key goes down while one key is still held | Slur: the same bow, the finger moves to the new pitch |
+| The next key goes down as the last one comes up, within 10 ms | Bow change: the bow turns without a new attack |
+| A gap between the keys | A new stroke |
+| Keys down within 30 ms of each other | A chord: each note its own bow |
+
+From a keyboard, play legato: hold each key until the next is down. In a
+DAW, lengthen each note of a slur so it overlaps the next by a few
+milliseconds; notes that end where the next begins change bow. At
+EVERY NOTE (Off) each key is a new stroke. A plucked patch and a section
+always re-attack. The sustain pedal is not read: a bow has no damper,
+and a pedal holding keys down would slur every note after it.
 
 ## Level
 

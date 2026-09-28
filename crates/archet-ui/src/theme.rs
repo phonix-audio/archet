@@ -16,7 +16,7 @@ use phonix_ui::theme::Palette;
 
 use crate::colors::*;
 
-pub use phonix_ui::theme::{gradient_v, heading, lamp, lerp_colour, plate, printed, recess, screw};
+pub use phonix_ui::theme::{caption, gradient_v, heading, lamp, lerp_colour, plate, printed, recess, screw};
 
 /// The colours the shared knobs, meters, pickers and vocabulary read on
 /// this instrument.

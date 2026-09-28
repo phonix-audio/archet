@@ -26,7 +26,8 @@ Test: `archet-plugin`, `frozen_identifiers`.
 
 `preset` is the one automatable parameter; `patch` and `editor-state` are
 the two persisted keys. A host stores
-automation against the id string.
+automation against the id string. Ids are append-only: `legato` (0 Off,
+1 Auto, default Auto) was appended on 2026-09-28, after `tune_cents`.
 
 ## Patch serde field names and defaults
 

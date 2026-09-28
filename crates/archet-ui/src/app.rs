@@ -56,6 +56,10 @@ pub struct ArchetApp {
     /// The effects page moved something the audio thread has not taken yet.
     fx_dirty: bool,
     fx_page: crate::fx_page::FxPageState,
+    /// The Legato host parameter as the plugin last handed it: Auto when true.
+    legato: bool,
+    /// A legato switch click pending, for the plugin to move the parameter.
+    wants_legato: Option<bool>,
 }
 
 impl ArchetApp {
@@ -76,6 +80,8 @@ impl ArchetApp {
             tab: 0,
             fx_dirty: false,
             fx_page: Default::default(),
+            legato: true,
+            wants_legato: None,
         }
     }
 
@@ -101,6 +107,16 @@ impl ArchetApp {
 
     pub fn take_wants_preset(&mut self) -> Option<i32> {
         self.wants_preset.take()
+    }
+
+    /// The Legato host parameter, Auto when true, as the switch shows it.
+    pub fn set_legato(&mut self, auto: bool) {
+        self.legato = auto;
+    }
+
+    /// A legato switch click since the last call: the value asked for.
+    pub fn take_wants_legato(&mut self) -> Option<bool> {
+        self.wants_legato.take()
     }
 
     /// An edit of the chain, as the effects page makes one: the chain moves
@@ -409,6 +425,17 @@ impl ArchetApp {
                 self.set(param, nv);
             }
         }
+
+        // How the keys phrase: overlapping keys slur, touching keys change
+        // bow. Unlit where it does not act, on a pluck or a section.
+        let acts = !self.patch.pluck && !self.patch.is_section();
+        let tint = if acts { ROSIN } else { dim(ROSIN) };
+        let legato = geom::legato_switch(band);
+        if let Some(i) = machine::switch(ui, legato, &["EVERY NOTE", "LEGATO"], usize::from(self.legato), tint, "ar_legato") {
+            self.legato = i == 1;
+            self.wants_legato = Some(self.legato);
+        }
+        theme::caption(ui, legato.left_bottom() + Vec2::new(0.0, 4.0), "overlap slurs, touch turns the bow", PLATE_SILK_DIM);
 
         // The section, and what leaves: the right end of the tier.
         if let Some(nv) = self.knob(ui, geom::section_knob(band, 0), geom::KNOB, "PLAYERS",

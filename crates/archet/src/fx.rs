@@ -116,7 +116,7 @@ pub fn space_for(p: &ArchetPatch) -> Space {
         ROOM
     } else if p.auto_range {
         CONCERT
-    } else if p.ensemble >= 1.5 {
+    } else if p.is_section() {
         HALL
     } else if p.bow_pos <= 0.05 {
         PONTICELLO
