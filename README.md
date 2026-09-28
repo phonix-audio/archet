@@ -49,7 +49,7 @@ snapshot tests and `--check` fails when the pictures fall behind it.
 ## Playing legato
 
 The Legato switch on the player's band, a host parameter, reads the
-keys as a string player phrases, on a bowed soloist:
+keys as a string player phrases, on a bowed soloist or section:
 
 | Keys | Stroke |
 |------|--------|
@@ -61,8 +61,9 @@ keys as a string player phrases, on a bowed soloist:
 From a keyboard, play legato: hold each key until the next is down. In a
 DAW, lengthen each note of a slur so it overlaps the next by a few
 milliseconds; notes that end where the next begins change bow. At
-EVERY NOTE (Off) each key is a new stroke. A plucked patch and a section
-always re-attack. The sustain pedal is not read: a bow has no damper,
+EVERY NOTE (Off) each key is a new stroke. A plucked patch always
+re-attacks. On a section every player slurs or turns its bow on its own
+voice, a few milliseconds apart and on its own intonation. The sustain pedal is not read: a bow has no damper,
 and a pedal holding keys down would slur every note after it.
 
 ## Level

@@ -57,15 +57,12 @@ pub struct ArchetPlugin {
     /// MIDI to strokes: new bow, slur or bow change. `None` until
     /// `initialize` knows the sample rate and the block size.
     phrasing:        Option<Phrasing>,
-    /// Whether the loaded patch plucks, and whether it plays a section:
-    /// taken from a preset when one loads and from the host parameters
-    /// when they move.
+    /// Whether the loaded patch plucks: taken from a preset when one loads
+    /// and from the host parameter when it moves.
     pluck:           bool,
-    section:         bool,
-    /// The articulation and ensemble host values last seen, so a move of
-    /// either is told from a preset that left them where they were.
+    /// The articulation host value last seen, so a move of it is told
+    /// from a preset that left it where it was.
     seen_art:        i32,
-    seen_ens:        f32,
 }
 
 const INIT_SIG_LEN: usize = 19;
@@ -127,9 +124,7 @@ impl Default for ArchetPlugin {
             last_init_sig:   None,
             phrasing:        None,
             pluck:           false,
-            section:         false,
             seen_art:        -1,
-            seen_ens:        -1.0,
         }
     }
 }
@@ -596,9 +591,7 @@ impl Plugin for ArchetPlugin {
         self.fx_link.seed(patch.fx.clone());
         self.fx_seen = self.fx_link.rev();
         self.pluck = patch.pluck;
-        self.section = patch.is_section();
         self.seen_art = self.params.articulation.value();
-        self.seen_ens = self.params.ensemble.value();
         let _ = self.command_tx.send(ArchetCommand::LoadPatch(Box::new(patch)));
         self.last_preset = self.params.preset.value();
         self.last_init_sig = None;
@@ -628,7 +621,6 @@ impl Plugin for ArchetPlugin {
                 if let Some(patch) = self.factory_presets.get(idx) {
                     let _ = tx.send(ArchetCommand::LoadPatch(Box::new(patch.clone())));
                     self.pluck = patch.pluck;
-                    self.section = patch.is_section();
                     // The preset's own chain, from the bank rather than from
                     // the editor: this branch also fires on host automation.
                     if let Some(c) = self.fx_chain.as_mut() {
@@ -673,20 +665,16 @@ impl Plugin for ArchetPlugin {
         }
 
         // -- MIDI events --
-        // A move of the articulation or the ensemble parameter, from the
-        // host or from the window, is what the engine now plays.
-        let (art, ens) = (self.params.articulation.value(), self.params.ensemble.value());
+        // A move of the articulation parameter, from the host or from the
+        // window, is what the engine now plays.
+        let art = self.params.articulation.value();
         if art != self.seen_art {
             self.seen_art = art;
             self.pluck = art != 0;
         }
-        if ens != self.seen_ens {
-            self.seen_ens = ens;
-            self.section = ArchetPatch::section_of(ens);
-        }
         let frames = buffer.samples() as u32;
         if let Some(p) = self.phrasing.as_mut() {
-            p.set_mode(self.params.legato.value() != 0, !self.pluck && !self.section);
+            p.set_mode(self.params.legato.value() != 0, !self.pluck);
             let mut emit = |c: ArchetCommand| { let _ = tx.send(c); };
             while let Some(event) = context.next_event() {
                 let midi = match event {

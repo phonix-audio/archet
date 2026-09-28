@@ -427,8 +427,8 @@ impl ArchetApp {
         }
 
         // How the keys phrase: overlapping keys slur, touching keys change
-        // bow. Unlit where it does not act, on a pluck or a section.
-        let acts = !self.patch.pluck && !self.patch.is_section();
+        // bow. Unlit where it does not act, on a pluck.
+        let acts = !self.patch.pluck;
         let tint = if acts { ROSIN } else { dim(ROSIN) };
         let legato = geom::legato_switch(band);
         if let Some(i) = machine::switch(ui, legato, &["EVERY NOTE", "LEGATO"], usize::from(self.legato), tint, "ar_legato") {

@@ -1,18 +1,18 @@
 //! MIDI to bow strokes: which note-on is a new stroke, a slur or a bow
 //! change.
 //!
-//! With the Legato control at Auto, on a bowed line (not plucked, not a
-//! section):
+//! With the Legato control at Auto, on a bowed patch, soloist or section:
 //!
 //! - a note-on while exactly one other key is held, pressed alone, slurs
-//!   from it: `NoteOnLegato`, the sounding voice carries on to the new pitch
-//!   and the held key's note-off then finds no voice;
+//!   from it: `NoteOnLegato`, the sounding voice, or each player of the
+//!   section, carries on to the new pitch and the held key's note-off then
+//!   finds no voice;
 //! - a note-on with no key held, within `TOUCH_S` of the last key coming
 //!   up, is a bow change: `BowChange`, detache without a new attack;
 //! - anything else is a new stroke: `NoteOn`. Keys pressed within
 //!   `CHORD_S` of each other are a chord, each its own bow.
 //!
-//! At Off, or on a plucked or section patch, every note-on is `NoteOn`.
+//! At Off, or on a plucked patch, every note-on is `NoteOn`.
 //! The sustain pedal is not read: a bow has no damper, and a pedal holding
 //! keys down would turn every following note into a slur.
 //!
@@ -62,8 +62,8 @@ pub struct Phrasing {
     last_up: Option<u64>,
     /// Auto: overlaps slur and touching notes change bow.
     auto: bool,
-    /// The patch plays one bowed line: not plucked, not a section.
-    bowed_line: bool,
+    /// The patch is bowed, not plucked.
+    bowed: bool,
     /// The block's events as (timing, rank, arrival, event); its capacity is
     /// fixed at construction and never grown.
     events: Vec<(u32, u8, u32, Midi)>,
@@ -82,15 +82,15 @@ impl Phrasing {
             last_on: None,
             last_up: None,
             auto: true,
-            bowed_line: true,
+            bowed: true,
             events: Vec::with_capacity(capacity.max(1)),
         }
     }
 
-    /// The Legato control and whether the patch is one bowed line.
-    pub fn set_mode(&mut self, auto: bool, bowed_line: bool) {
+    /// The Legato control and whether the patch is bowed.
+    pub fn set_mode(&mut self, auto: bool, bowed: bool) {
         self.auto = auto;
-        self.bowed_line = bowed_line;
+        self.bowed = bowed;
     }
 
     /// Queues one event at `timing` samples into the block. A full queue is
@@ -126,7 +126,7 @@ impl Phrasing {
             Midi::On(note, vel) => {
                 let key = usize::from(note & 0x7f);
                 let lone = self.last_on.is_none_or(|on| t.saturating_sub(on) >= self.chord);
-                let phrased = self.auto && self.bowed_line;
+                let phrased = self.auto && self.bowed;
                 let cmd = if phrased && self.held_count == 1 && !self.held[key] && lone {
                     ArchetCommand::NoteOnLegato(note, vel)
                 } else if phrased
@@ -184,9 +184,9 @@ mod tests {
     }
 
     /// The commands a timed event list becomes, `(seconds, event)`.
-    fn phrase(auto: bool, bowed_line: bool, events: &[(f32, Midi)]) -> Vec<&'static str> {
+    fn phrase(auto: bool, bowed: bool, events: &[(f32, Midi)]) -> Vec<&'static str> {
         let mut p = Phrasing::new(SR, BLOCK as usize);
-        p.set_mode(auto, bowed_line);
+        p.set_mode(auto, bowed);
         let mut out = Vec::new();
         let end = events.iter().map(|e| (e.0 * SR) as u64).max().unwrap_or(0) + u64::from(BLOCK);
         let mut start = 0u64;
@@ -238,7 +238,7 @@ mod tests {
     }
 
     #[test]
-    fn off_and_pluck_and_section_reattack() {
+    fn off_and_pluck_reattack() {
         let overlap = [(0.0, Midi::On(69, 100)), (0.4, Midi::On(71, 100)), (0.45, Midi::Off(69))];
         let touch = [(0.0, Midi::On(69, 100)), (0.4, Midi::Off(69)), (0.4, Midi::On(71, 100))];
         assert_eq!(phrase(false, true, &overlap), ["on", "on", "off"]);
@@ -259,7 +259,12 @@ mod tests {
     /// the solo violin: the left channel, and the voices the engine's meter
     /// last counted sounding.
     fn render(auto: bool, events: &[(f32, Midi)], secs: f32) -> (Vec<f32>, usize) {
-        let patch = ArchetPatch::factory_presets().into_iter().find(|p| p.name == "Violin Solo").unwrap();
+        render_on("Violin Solo", auto, events, secs)
+    }
+
+    /// `render` on the factory preset `name`.
+    fn render_on(name: &str, auto: bool, events: &[(f32, Midi)], secs: f32) -> (Vec<f32>, usize) {
+        let patch = ArchetPatch::factory_presets().into_iter().find(|p| p.name == name).unwrap();
         let (mut eng, tx, mr) = ArchetEngine::new_for_plugin(SR);
         tx.send(ArchetCommand::LoadPatch(Box::new(patch))).unwrap();
         let mut p = Phrasing::new(SR, BLOCK as usize);
@@ -306,6 +311,20 @@ mod tests {
     fn a_bow_change_is_one_voice_and_off_two() {
         assert_eq!(render(true, &TOUCH, 0.54).1, 1, "the bow change started a voice");
         assert_eq!(render(false, &TOUCH, 0.54).1, 2, "off did not re-attack");
+    }
+
+    /// On a section a slur and a bow change keep the one note's players;
+    /// Off lights a second set.
+    #[test]
+    fn a_section_slurs_and_changes_bow_at_auto() {
+        for name in ["Violin Section", "Cinematic Strings", "Full String Ensemble"] {
+            let (_, one) = render_on(name, true, &[(0.0, Midi::On(69, 100))], 0.54);
+            assert!(one > 1, "{name} lit one voice");
+            for events in [&OVERLAP, &TOUCH] {
+                assert_eq!(render_on(name, true, events, 0.54).1, one, "{name} re-attacked at Auto");
+                assert_eq!(render_on(name, false, events, 0.54).1, 2 * one, "{name} did not re-attack at Off");
+            }
+        }
     }
 
     /// The Legato control at its two ends, in the contexts it acts in: a
