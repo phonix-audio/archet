@@ -464,7 +464,7 @@ impl ArchetEngine {
                     self.patch_dirty = true;
                 }
                 ArchetCommand::SetOutputLevel(l) => {
-                    self.patch.output_level = l.clamp(0.0, 2.0);
+                    self.patch.output_level = l.clamp(0.0, 4.0);
                     self.patch_dirty = true;
                 }
                 ArchetCommand::LoadPatch(p) => {
