@@ -50,15 +50,19 @@ impl Noise {
 /// Helmholtz motion takes to establish at a mezzo-forte.
 const ATTACK_QUICK: f32 = 0.1;
 
-/// The dynamic's brightness: the bridge force rolls off, one pole, at a
-/// harmonic number that rises with the dynamic as BRIGHT_BASE e^(BRIGHT_RISE v),
-/// v the velocity from nought to one. Fitted so the spectral centroid rises
-/// as on the sixteen anechoic notes of the violin's G and D strings and A
-/// string at pp, mf and ff (Iowa): the median mf over pp 1.22 and ff over pp
-/// 1.83, which a string of any friction law playing a Helmholtz motion does
-/// not give.
-const BRIGHT_BASE: f32 = 0.4;
-const BRIGHT_RISE: f32 = 3.6;
+/// The dynamic's brightness: a tilt of the bridge force about a corner at
+/// BRIGHT_CORNER times the note's frequency, the highs gaining and the lows
+/// losing half of TILT dB each, where TILT is a parabola of the velocity v
+/// about mezzo-forte (v = 0.63): BRIGHT_MF + BRIGHT_SLOPE x + BRIGHT_BEND x^2.
+/// Fitted so the spectral centroid sits where it does on sixteen anechoic
+/// notes of the violin's G, D and A strings at pp, mf and ff (Iowa, medians
+/// 730, 923 and 1318 Hz over 150 to 8000 Hz), which a string playing a
+/// Helmholtz motion does not give under any friction law tried.
+const BRIGHT_CORNER: f32 = 2.5;
+const BRIGHT_MF: f32 = -2.3;
+const BRIGHT_SLOPE: f32 = 27.2;
+const BRIGHT_BEND: f32 = 23.8;
+const VEL_MF: f32 = 0.63;
 
 /// Metres per second per unit of the string model's bow velocity: the
 /// loudest bow of the model, 0.19, is a metre per second.
@@ -88,7 +92,7 @@ const BOW_POS_LEVEL_EXP: f32 = 0.2;
 /// dynamic range from its softest to its loudest (Meyer, Acoustics and the
 /// Performance of Music, about 25 dB; the anechoic recordings put 16 dB
 /// between pp and ff).
-const SPEED_RANGE_DB: f32 = 15.2;
+const SPEED_RANGE_DB: f32 = 20.5;
 
 /// The cycle-to-cycle spread of a violin vibrato's period and extent, as
 /// fractions, measured on a recorded held note with a normal vibrato
@@ -188,6 +192,7 @@ pub struct ArchetVoice {
     bow_trim: f32,        // the bowed level's correction for the bow's point
     bow_lp: f32,          // the bowed bridge force's brightness filter: state
     bow_lp_a: f32,        // and its coefficient, set by the dynamic
+    bow_tilt: f32,        // the highs' gain over the lows, set by the dynamic
     string_damping: f32,  // scale on the string's loss law
     vib_cycle_rate: f32,  // this vibrato cycle's rate, around the note's
     vib_cycle_depth: f32, // this vibrato cycle's extent, around the note's
@@ -325,6 +330,7 @@ impl ArchetVoice {
             bow_trim: 1.0,
             bow_lp: 0.0,
             bow_lp_a: 1.0,
+            bow_tilt: 1.0,
             string_damping: 1.0,
             vib_cycle_rate: 1.0,
             vib_cycle_depth: 1.0,
@@ -760,8 +766,11 @@ impl ArchetVoice {
         self.bow_trim = (self.bow_beta / beta_ref).powf(BOW_POS_LEVEL_EXP);
         // The dynamic's brightness: the harmonic number where the bridge
         // force rolls off, rising with the dynamic.
-        let fc = (Self::freq_of(note) * BRIGHT_BASE * (BRIGHT_RISE * v).exp()).min(0.45 * self.sr);
+        let fc = (Self::freq_of(note) * BRIGHT_CORNER).min(0.45 * self.sr);
         self.bow_lp_a = 1.0 - (-std::f32::consts::TAU * fc / self.sr).exp();
+        let x = v - VEL_MF;
+        let tilt_db = BRIGHT_MF + BRIGHT_SLOPE * x + BRIGHT_BEND * x * x;
+        self.bow_tilt = 10f32.powf(tilt_db / 40.0);
         self.string_damping = (patch.loss / LOSS_NEUTRAL).clamp(0.25, 2.0);
 
         // The bow force in Schelleng's terms, over the string's impedance
@@ -1419,7 +1428,7 @@ impl ArchetVoice {
                 if self.releasing && self.stroke < 0.12 { self.modal_release_factor } else { 1.0 };
             let raw = self.modal.process(self.bow_vel, fb) * self.modal_gain * BOW_LEVEL * self.bow_trim * self.modal_pitch_gain;
             self.bow_lp += self.bow_lp_a * (raw - self.bow_lp);
-            self.bow_lp
+            self.bow_lp / self.bow_tilt + self.bow_tilt * (raw - self.bow_lp)
         };
 
         // Bow scratch noise, bandpassed (one-pole HP via diff of LP), injected

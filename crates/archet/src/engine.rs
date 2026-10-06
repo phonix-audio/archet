@@ -750,7 +750,7 @@ mod preset_sweep_tests {
             left.extend(buf.iter().step_by(2));
         }
         let h = crate::fingerprint::of(&left);
-        const GOLDEN: u64 = 0xef1ac93f089d10a8; // the ensemble render, note-offs included
+        const GOLDEN: u64 = 0xaa971d6a60457b2c; // the ensemble render, note-offs included
         assert_eq!(h, GOLDEN, "Archet ensemble render drifted from golden (hash {h:#018x})");
     }
 }
@@ -2436,12 +2436,9 @@ mod profile {
         let melody = [67u8, 71, 74, 79, 78, 74, 71, 69, 72, 76, 81, 79, 76, 72, 71, 67];
         let variants: Vec<(&str, ArchetPatch)> = vec![
             ("base", base.clone()),
-            ("pos05", ArchetPatch { bow_pos: 0.05, ..base.clone() }),
-            ("pos06", ArchetPatch { bow_pos: 0.06, ..base.clone() }),
-            ("hill15", ArchetPatch { bridge_hill_db: 15.0, ..base.clone() }),
-            ("hill22", ArchetPatch { bridge_hill_db: 22.0, ..base.clone() }),
-            ("pos05_hill5", ArchetPatch { bow_pos: 0.05, bridge_hill_db: 5.0, ..base.clone() }),
-            ("pos05_novib", ArchetPatch { bow_pos: 0.05, vib_depth: 0.0, ..base.clone() }),
+            ("novib", ArchetPatch { vib_depth: 0.0, ..base.clone() }),
+            ("pos11", ArchetPatch { bow_pos: 0.11, ..base.clone() }),
+            ("noise30", ArchetPatch { bow_noise: 0.30, ..base.clone() }),
         ];
         for (name, p) in variants {
             let (mut eng, tx, _mr) = ArchetEngine::new_for_plugin(sr);
@@ -3221,7 +3218,7 @@ mod golden_audio {
         }
         let h = crate::fingerprint::of(&left);
         eprintln!("GOLDEN = {h:#018x}");
-        assert_eq!(h, 0xc1dda444889d5294, "the engine's rendered audio changed");
+        assert_eq!(h, 0xdb3fc62ee47bc780, "the engine's rendered audio changed");
     }
 }
 
