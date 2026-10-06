@@ -11,15 +11,6 @@ a measurement, and what has been tried.
 
 ## Bowed
 
-- The friction is the thermal law (2026-10-07). Its transient kernel is
-  the t^-1/2 conduction of a semi-infinite pair plus a steady
-  constriction conductance, not the paper's own Green's function, and
-  the string's impedance per instrument (0.35, 0.45, 0.8 and 1.5 N s/m)
-  and the metre per second per unit of the model's bow velocity (1) are
-  approximations. At the speeds of a violin the contact runs hot for the
-  whole note, so the coefficient sits near its plateau and the law
-  mostly cleans the onset: a bowed note still takes about 150 ms to
-  settle, and the steady spectrum does not change with force.
 - The violin body is calibrated on the bowed open strings at mf (Iowa,
   the four strings, 2026-09-14): the third-octave envelope of the
   sustained note sits within 3.8 dB rms of the recordings' over 141-5702
