@@ -50,6 +50,9 @@ impl Noise {
 /// Helmholtz motion takes to establish at a mezzo-forte.
 const ATTACK_QUICK: f32 = 0.1;
 
+/// Metres per second per unit of the string model's bow velocity.
+const THERMAL_SPEED: f32 = 1.0;
+
 const PRESS_SOFT: f32 = 3.0;
 const PRESS_LOUD: f32 = 7.0;
 
@@ -59,7 +62,16 @@ const PRESS_LOUD: f32 = 7.0;
 /// full velocity must peak where the engine's norm puts the largest
 /// section's reference chord at full scale. The plugin's bank guard
 /// measures it on the loudest factory preset.
-const BOW_LEVEL: f32 = 0.88;
+const BOW_LEVEL: f32 = 0.72;
+
+/// How the bowed bridge force's level follows the bow's distance from the
+/// bridge, as the exponent of that distance: the rms of a sixteen-note
+/// violin melody rises 0.7 dB when the bow moves from 0.075 to 0.05 of the
+/// string's length (the peaks rise more, the upper partials gaining under
+/// the bow point's comb). The voice undoes it against
+/// each instrument's own reference position, so a preset's level does not
+/// depend on where it bows.
+const BOW_POS_LEVEL_EXP: f32 = 0.2;
 
 /// The bow speed range over the whole velocity range, in dB: a violin's
 /// dynamic range from its softest to its loudest (Meyer, Acoustics and the
@@ -162,6 +174,7 @@ pub struct ArchetVoice {
     // humanization (separate noise stream so it doesn't colour the bow scratch)
     hum: Noise,
     bow_beta: f32,        // the bow's point on the string, a fraction of its length
+    bow_trim: f32,        // the bowed level's correction for the bow's point
     string_damping: f32,  // scale on the string's loss law
     vib_cycle_rate: f32,  // this vibrato cycle's rate, around the note's
     vib_cycle_depth: f32, // this vibrato cycle's extent, around the note's
@@ -296,6 +309,7 @@ impl ArchetVoice {
             grit_bp: Biquad::bandpass(sr, 520.0, 0.9),
             hum,
             bow_beta: 0.075,
+            bow_trim: 1.0,
             string_damping: 1.0,
             vib_cycle_rate: 1.0,
             vib_cycle_depth: 1.0,
@@ -655,6 +669,15 @@ impl ArchetVoice {
     /// power of five notes spanning the instrument's own register, at one
     /// velocity, to the violin's; engine::profile::inst_balance measures
     /// it and prints the figure that would hold.
+    /// The transverse impedance of the bowed string, N s/m, per instrument.
+    fn string_impedance(idx: usize) -> f32 {
+        match idx {
+            0 => 0.35,
+            1 => 0.45,
+            2 => 0.8,
+            _ => 1.5,
+        }
+    }
     pub(crate) fn inst_level(idx: usize) -> f32 {
         match idx {
             0 => 1.00,
@@ -714,6 +737,8 @@ impl ArchetVoice {
         // how damped it is about its calibrated law, and how much of the
         // dynamic range the velocity commands.
         self.bow_beta = patch.bow_pos.clamp(0.03, 0.2);
+        let beta_ref = Self::modal_params(self.inst_idx, self.freq_hz).3;
+        self.bow_trim = (self.bow_beta / beta_ref).powf(BOW_POS_LEVEL_EXP);
         self.string_damping = (patch.loss / LOSS_NEUTRAL).clamp(0.25, 2.0);
 
         // The bow force in Schelleng's terms, over the string's impedance
@@ -947,6 +972,7 @@ impl ArchetVoice {
             self.modal.noise_amt = match self.inst_idx { 0 => 0.12, 1 => 0.05, _ => 0.02 };
             self.modal.set_voice(self.freq_hz, b1, b2, stiff, beta);
             self.modal.reset(); // fresh bow stroke: silent string, perfect-start bow catches it
+            self.modal.set_thermal(true, THERMAL_SPEED, Self::string_impedance(self.inst_idx));
         }
 
         self.vib_cycle_rate = 1.0;
@@ -1363,7 +1389,7 @@ impl ArchetVoice {
             // the string and decelerating.
             self.modal.release_damp =
                 if self.releasing && self.stroke < 0.12 { self.modal_release_factor } else { 1.0 };
-            self.modal.process(self.bow_vel, fb) * self.modal_gain * BOW_LEVEL * self.modal_pitch_gain
+            self.modal.process(self.bow_vel, fb) * self.modal_gain * BOW_LEVEL * self.bow_trim * self.modal_pitch_gain
         };
 
         // Bow scratch noise, bandpassed (one-pole HP via diff of LP), injected

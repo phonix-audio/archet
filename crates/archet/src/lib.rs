@@ -17,6 +17,7 @@ pub mod fingerprint;
 pub mod modal;
 pub mod patch;
 pub mod sympathetic;
+pub mod thermal;
 pub mod voice;
 
 pub use engine::{ArchetCommand, ArchetEngine, ArchetMeterState};

@@ -66,6 +66,9 @@ pub struct ModalString {
     fret_norm: f64,       // 1 / sum(fret_phi^2 * x3): converts a desired displacement correction to a force
     disp_env:  f64,       // running envelope of |displacement at the fret|
     fret_on:   bool,
+    /// The thermal friction law, when it replaces the friction curve, and
+    /// the scale from the model's units to metres per second and newtons.
+    thermal: Option<(crate::thermal::Thermal, f64, f64)>,
 }
 
 impl ModalString {
@@ -86,9 +89,22 @@ impl ModalString {
             steps: 0, slips: 0,
             fret_phi: vec![0.0; MAX_MODES], fret_frac: 0.5, fret_hard: 0.0,
             fret_norm: 1.0, disp_env: 0.0, fret_on: false,
+            thermal: None,
         };
         s.set_voice(196.0, 3.0, 6.0, 1.0e-4, 0.10);
         s
+    }
+
+    /// Bow with the thermal friction law. `speed_scale` is metres per
+    /// second per unit of model velocity and `z` the string's transverse
+    /// impedance in N s/m; the model's numerical impedance stands for twice
+    /// that, which fixes the newtons per unit of model force.
+    pub fn set_thermal(&mut self, on: bool, speed_scale: f32, z: f32) {
+        self.thermal = on.then(|| {
+            let kv = speed_scale as f64;
+            let kf = 2.0 * z as f64 * kv * self.b00;
+            (crate::thermal::Thermal::new(self.sr), kv, kf)
+        });
     }
 
     fn rand(&mut self) -> f32 {
@@ -378,7 +394,24 @@ impl ModalString {
         let mu_d = self.mu_d as f64;
         let f0_stick = c01 * (vb - v0h); // force to make string velocity = bow (stick)
         let mut f0;
-        if fb <= 0.0 {
+        if let Some((th, kv, kf)) = self.thermal.as_mut() {
+            if fb <= 0.0 {
+                f0 = 0.0;
+                self.slipping = false;
+                th.reset();
+            } else {
+                let limit = th.mu() * fb;
+                if f0_stick.abs() <= limit {
+                    f0 = f0_stick;
+                    self.slipping = false;
+                } else {
+                    f0 = limit * f0_stick.signum();
+                    self.slipping = true;
+                }
+                let slide = (vb - v0h - f0 * self.b00).abs() * *kv;
+                th.step(f0.abs() * *kf * slide, slide, fb * *kf);
+            }
+        } else if fb <= 0.0 {
             // bow fully lifted / free-ringing pluck: exactly force-free (the slip
             // quadratic can return spurious force at fb=0), and cheaper on tails.
             f0 = 0.0;
@@ -600,6 +633,49 @@ mod tests {
             println!("--- {} f0={:.1} beta={:.3}  harmonicity={:6.1}  raw centroid={:5.0} Hz ---",
                      lbl, f0, probe.beta, h, c);
             write_wav(&format!("/tmp/modal_{}.wav", lbl), &out, sr);
+        }
+    }
+}
+
+#[cfg(test)]
+mod thermal_audit {
+    use super::*;
+
+    /// The bare string at B flat 4 under the voice's bow gesture, with each
+    /// friction law; writes bare_<law>_<dynamic>.raw (f32 mono) into ARCHET_RENDER_DIR.
+    ///   cargo test -p archet --lib --release modal::thermal_audit -- --ignored --nocapture
+    #[test]
+    #[ignore = "diagnostic - run with --ignored"]
+    fn bare_laws() {
+        let sr = 48_000.0f32;
+        let f0 = 466.16f32;
+        for law in ["hyper", "thermal"] {
+            for (name, press, speed) in [("pp", 3.0f32, 0.016f32), ("mf", 5.0, 0.06), ("ff", 7.0, 0.19)] {
+                let mut m = ModalString::new(sr);
+                m.set_voice(f0, 1.6, 0.045 * (1.0 + (f0 / 750.0).powi(2)), 2.0e-5, 0.075);
+                m.noise_amt = 0.0;
+                m.reset();
+                if law == "thermal" {
+                    m.set_thermal(true, 1.0, 0.35);
+                }
+                let fb = press * m.impedance();
+                let mut out = Vec::new();
+                let mut slips = Vec::new();
+                let rise = (0.04 * sr) as usize;
+                for i in 0..(sr as usize * 4) {
+                    let vb = speed * (i as f32 / rise as f32).min(1.0);
+                    out.push(m.process(vb, fb * speed));
+                    if (i + 1) % 1200 == 0 && i < 24000 {
+                        slips.push(format!("{:.0}", 100.0 * m.slips as f32 / m.steps.max(1) as f32));
+                        m.slips = 0;
+                        m.steps = 0;
+                    }
+                }
+                let dir = std::env::var_os("ARCHET_RENDER_DIR").expect("set ARCHET_RENDER_DIR");
+                let bytes: Vec<u8> = out.iter().flat_map(|v| v.to_le_bytes()).collect();
+                std::fs::write(std::path::Path::new(&dir).join(format!("bare_{law}_{name}.raw")), bytes).unwrap();
+                println!("{law} {name}: slip% per 25 ms {}", slips.join(" "));
+            }
         }
     }
 }

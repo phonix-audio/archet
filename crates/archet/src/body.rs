@@ -229,14 +229,14 @@ const VIOLIN: BodySpec = BodySpec {
     level_spacing: 170.0,
     bank_db: -9.0,
     hill_f: 2700.0,
-    hill_gain: 0.35,
+    hill_gain: 0.65,
     roll_f: 4000.0,
     roll_db_oct: -4.0,
     roll2_f: 4200.0,
-    roll2_db_oct: -10.0,
+    roll2_db_oct: -6.0,
     hp_f: 360.0,
     hp_poles: 4,
-    lp_f: 5100.0,
+    lp_f: 6200.0,
 };
 
 // Viola: A0 measured at 208-244 Hz across five violas (Coffey 2013) and 224 Hz
@@ -623,6 +623,6 @@ mod shared_filter_migration {
         let sig = probe();
         let mut body = ModalBody::new(48_000.0, 0, 1.0, 6.0); // violin body
         let o: Vec<f32> = sig.iter().map(|&x| body.process(x)).collect();
-        assert_eq!(crate::fingerprint::of(&o), 9637368526334119063, "archet ModalBody drifted");
+        assert_eq!(crate::fingerprint::of(&o), 7455991597594355845, "archet ModalBody drifted");
     }
 }

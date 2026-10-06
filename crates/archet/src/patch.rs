@@ -231,7 +231,7 @@ impl Default for ArchetPatch {
             auto_range: false,
             pluck: false,
             polyphony: 8,
-            bow_pos: 0.075,
+            bow_pos: 0.05,
             bow_vel: 0.18,
             bow_force: 1.0,
             loss: 0.30,
