@@ -2336,12 +2336,80 @@ mod profile {
         println!("  four-note chord peak in the bare engine: {peak:.2}");
     }
 
+    /// Mezzo-forte notes without vibrato, one per file, for the spectral
+    /// comparison with recordings: audit_<note>.wav in ARCHET_RENDER_DIR.
+    #[test]
+    #[ignore = "diagnostic - run with --ignored"]
+    fn audit_notes() {
+        let sr = 48_000.0_f32;
+        let block = 512usize;
+        let bank = crate::patch::ArchetPatch::factory_presets();
+        let preset = bank.iter().find(|p| p.name == "Violin Solo").unwrap();
+        for note in 55u8..=84 {
+            let (mut eng, tx, _mr) = ArchetEngine::new_for_plugin(sr);
+            let mut p = preset.clone();
+            p.vib_depth = 0.0;
+            tx.send(ArchetCommand::LoadPatch(Box::new(p))).unwrap();
+            let mut buf = vec![0.0f32; block * 2];
+            eng.process_audio(&mut buf, 2);
+            tx.send(ArchetCommand::NoteOn(note, 80)).unwrap();
+            let mut out: Vec<f32> = Vec::new();
+            for _ in 0..(4.0 * sr) as usize / block {
+                buf.fill(0.0);
+                eng.process_audio(&mut buf, 2);
+                for k in 0..block { out.push(buf[k * 2]); }
+            }
+            write_wav(&format!("audit_{note}.wav"), &out, sr);
+        }
+    }
+
+    /// A melody across the violin's range on the solo patch, rendered once
+    /// per variant of the patch, into variant_<name>.wav in ARCHET_RENDER_DIR,
+    /// for listening to what a control changes.
+    #[test]
+    #[ignore = "diagnostic - run with --ignored"]
+    fn variants() {
+        let sr = 48_000.0_f32;
+        let block = 512usize;
+        let bank = crate::patch::ArchetPatch::factory_presets();
+        let base = bank.iter().find(|p| p.name == "Violin Solo").unwrap().clone();
+        let melody = [67u8, 71, 74, 79, 78, 74, 71, 69, 72, 76, 81, 79, 76, 72, 71, 67];
+        let variants: Vec<(&str, ArchetPatch)> = vec![
+            ("base", base.clone()),
+            ("pos05", ArchetPatch { bow_pos: 0.05, ..base.clone() }),
+            ("pos06", ArchetPatch { bow_pos: 0.06, ..base.clone() }),
+            ("hill15", ArchetPatch { bridge_hill_db: 15.0, ..base.clone() }),
+            ("hill22", ArchetPatch { bridge_hill_db: 22.0, ..base.clone() }),
+            ("pos05_hill5", ArchetPatch { bow_pos: 0.05, bridge_hill_db: 5.0, ..base.clone() }),
+            ("pos05_novib", ArchetPatch { bow_pos: 0.05, vib_depth: 0.0, ..base.clone() }),
+        ];
+        for (name, p) in variants {
+            let (mut eng, tx, _mr) = ArchetEngine::new_for_plugin(sr);
+            tx.send(ArchetCommand::LoadPatch(Box::new(p))).unwrap();
+            let mut buf = vec![0.0f32; block * 2];
+            eng.process_audio(&mut buf, 2);
+            let mut out: Vec<f32> = Vec::new();
+            for &n in &melody {
+                tx.send(ArchetCommand::NoteOn(n, 80)).unwrap();
+                for step in 0..(0.9 * sr) as usize / block {
+                    if step == (0.75 * sr) as usize / block {
+                        tx.send(ArchetCommand::NoteOff(n)).unwrap();
+                    }
+                    buf.fill(0.0);
+                    eng.process_audio(&mut buf, 2);
+                    for k in 0..block { out.push(buf[k * 2]); }
+                }
+            }
+            write_wav(&format!("variant_{name}.wav"), &out, sr);
+        }
+    }
+    ///   cargo test --lib engine::profile::bow_held -- --ignored --nocapture
     /// A held bowed note at three dynamics, for comparison with a recording.
     ///
     /// The solo violin patch holds a B flat on the A string, a stopped note
     /// so the vibrato is in play, for eight seconds, then the bow lifts.
-    /// Written to /tmp/archet_bow_held_<velocity>.wav.
-    ///   cargo test --lib engine::profile::bow_held -- --ignored --nocapture
+    /// Written to archet_bow_held_<velocity>.wav in ARCHET_RENDER_DIR.
+    ///   ARCHET_RENDER_DIR=<dir> cargo test --lib engine::profile::bow_held -- --ignored --nocapture
     #[test]
     #[ignore = "diagnostic - run with --ignored"]
     fn bow_held() {
@@ -2516,13 +2584,17 @@ mod profile {
                 fired[i] = true;
             }
             mix.iter_mut().for_each(|m| *m = 0.0);
+            let mut desk_mix = vec![vec![0.0f32; block]; piece.desks.len()];
             for (e, (eng, _, _)) in engines.iter_mut().enumerate() {
                 buf.fill(0.0);
                 eng.process_audio(&mut buf, 2);
                 for i in 0..block {
                     mix[i] += buf[i * 2];
-                    stems[e / 2].push(buf[i * 2]);
+                    desk_mix[e / 2][i] += buf[i * 2];
                 }
+            }
+            for (stem, block_mix) in stems.iter_mut().zip(&desk_mix) {
+                stem.extend_from_slice(block_mix);
             }
             out.extend_from_slice(&mix);
             t += block as f32 / sr;
@@ -2820,8 +2892,18 @@ mod profile {
         println!("wrote /tmp/archet_bass_{{28,33,40,45,52}}.wav");
     }
 
+    /// Where a diagnostic's file lands: the directory ARCHET_RENDER_DIR
+    /// names, under the file's own name. A diagnostic never writes to a
+    /// shared temporary directory.
+    fn render_path(path: &str) -> std::path::PathBuf {
+        let dir = std::env::var_os("ARCHET_RENDER_DIR")
+            .expect("set ARCHET_RENDER_DIR to the directory the renders go to");
+        std::path::Path::new(&dir).join(std::path::Path::new(path).file_name().unwrap())
+    }
+
     fn write_wav(path: &str, mono: &[f32], sr: f32) {
         use std::io::Write;
+        let path = &render_path(path);
         let n = mono.len();
         let byte_rate = (sr as u32) * 2 * 2;
         let data_len = (n * 2 * 2) as u32;
