@@ -50,6 +50,16 @@ impl Noise {
 /// Helmholtz motion takes to establish at a mezzo-forte.
 const ATTACK_QUICK: f32 = 0.1;
 
+/// The dynamic's brightness: the bridge force rolls off, one pole, at a
+/// harmonic number that rises with the dynamic as BRIGHT_BASE e^(BRIGHT_RISE v),
+/// v the velocity from nought to one. Fitted so the spectral centroid rises
+/// as on the sixteen anechoic notes of the violin's G and D strings and A
+/// string at pp, mf and ff (Iowa): the median mf over pp 1.22 and ff over pp
+/// 1.83, which a string of any friction law playing a Helmholtz motion does
+/// not give.
+const BRIGHT_BASE: f32 = 0.4;
+const BRIGHT_RISE: f32 = 3.6;
+
 /// Metres per second per unit of the string model's bow velocity: the
 /// loudest bow of the model, 0.19, is a metre per second.
 const THERMAL_SPEED: f32 = 5.0;
@@ -78,7 +88,7 @@ const BOW_POS_LEVEL_EXP: f32 = 0.2;
 /// dynamic range from its softest to its loudest (Meyer, Acoustics and the
 /// Performance of Music, about 25 dB; the anechoic recordings put 16 dB
 /// between pp and ff).
-const SPEED_RANGE_DB: f32 = 26.0;
+const SPEED_RANGE_DB: f32 = 15.2;
 
 /// The cycle-to-cycle spread of a violin vibrato's period and extent, as
 /// fractions, measured on a recorded held note with a normal vibrato
@@ -176,6 +186,8 @@ pub struct ArchetVoice {
     hum: Noise,
     bow_beta: f32,        // the bow's point on the string, a fraction of its length
     bow_trim: f32,        // the bowed level's correction for the bow's point
+    bow_lp: f32,          // the bowed bridge force's brightness filter: state
+    bow_lp_a: f32,        // and its coefficient, set by the dynamic
     string_damping: f32,  // scale on the string's loss law
     vib_cycle_rate: f32,  // this vibrato cycle's rate, around the note's
     vib_cycle_depth: f32, // this vibrato cycle's extent, around the note's
@@ -311,6 +323,8 @@ impl ArchetVoice {
             hum,
             bow_beta: 0.075,
             bow_trim: 1.0,
+            bow_lp: 0.0,
+            bow_lp_a: 1.0,
             string_damping: 1.0,
             vib_cycle_rate: 1.0,
             vib_cycle_depth: 1.0,
@@ -744,6 +758,10 @@ impl ArchetVoice {
         self.bow_beta = patch.bow_pos.clamp(0.03, 0.2);
         let beta_ref = Self::modal_params(self.inst_idx, self.freq_hz).3;
         self.bow_trim = (self.bow_beta / beta_ref).powf(BOW_POS_LEVEL_EXP);
+        // The dynamic's brightness: the harmonic number where the bridge
+        // force rolls off, rising with the dynamic.
+        let fc = (Self::freq_of(note) * BRIGHT_BASE * (BRIGHT_RISE * v).exp()).min(0.45 * self.sr);
+        self.bow_lp_a = 1.0 - (-std::f32::consts::TAU * fc / self.sr).exp();
         self.string_damping = (patch.loss / LOSS_NEUTRAL).clamp(0.25, 2.0);
 
         // The bow force in Schelleng's terms, over the string's impedance
@@ -1399,7 +1417,9 @@ impl ArchetVoice {
             // the string and decelerating.
             self.modal.release_damp =
                 if self.releasing && self.stroke < 0.12 { self.modal_release_factor } else { 1.0 };
-            self.modal.process(self.bow_vel, fb) * self.modal_gain * BOW_LEVEL * self.bow_trim * self.modal_pitch_gain
+            let raw = self.modal.process(self.bow_vel, fb) * self.modal_gain * BOW_LEVEL * self.bow_trim * self.modal_pitch_gain;
+            self.bow_lp += self.bow_lp_a * (raw - self.bow_lp);
+            self.bow_lp
         };
 
         // Bow scratch noise, bandpassed (one-pole HP via diff of LP), injected

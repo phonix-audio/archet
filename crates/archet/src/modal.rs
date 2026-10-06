@@ -665,7 +665,7 @@ mod thermal_audit {
                 m.set_voice(f0, 1.6, 0.045 * (1.0 + (f0 / 750.0).powi(2)), 2.0e-5, 0.075);
                 m.noise_amt = 0.0;
                 m.reset();
-                if law == "thermal" {
+                if law != "hyper" {
                     m.set_thermal(true, 5.0, 0.195);
                 }
                 let fb = press * m.impedance();

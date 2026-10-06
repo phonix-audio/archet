@@ -750,7 +750,7 @@ mod preset_sweep_tests {
             left.extend(buf.iter().step_by(2));
         }
         let h = crate::fingerprint::of(&left);
-        const GOLDEN: u64 = 0xbe4fb1c1572b6369; // the ensemble render, note-offs included
+        const GOLDEN: u64 = 0xef1ac93f089d10a8; // the ensemble render, note-offs included
         assert_eq!(h, GOLDEN, "Archet ensemble render drifted from golden (hash {h:#018x})");
     }
 }
@@ -2372,7 +2372,7 @@ mod profile {
         let block = 512usize;
         let bank = crate::patch::ArchetPatch::factory_presets();
         let preset = bank.iter().find(|p| p.name == "Violin Solo").unwrap();
-        for note in [69u8, 70, 71] {
+        for note in 55u8..=71 {
             for vel in [34u8, 80, 127] {
                 let (mut eng, tx, _mr) = ArchetEngine::new_for_plugin(sr);
                 let mut p = preset.clone();
@@ -2390,6 +2390,37 @@ mod profile {
                 write_wav(&format!("dyn_{note}_{vel}.wav"), &out, sr);
             }
         }
+    }
+
+    /// The same melody swelling from piano to forte and back, on the solo
+    /// patch: swell.wav in ARCHET_RENDER_DIR.
+    #[test]
+    #[ignore = "diagnostic - run with --ignored"]
+    fn swell() {
+        let sr = 48_000.0_f32;
+        let block = 512usize;
+        let bank = crate::patch::ArchetPatch::factory_presets();
+        let base = bank.iter().find(|p| p.name == "Violin Solo").unwrap().clone();
+        let melody = [67u8, 71, 74, 79, 78, 74, 71, 69, 72, 76, 81, 79, 76, 72, 71, 67];
+        let (mut eng, tx, _mr) = ArchetEngine::new_for_plugin(sr);
+        tx.send(ArchetCommand::LoadPatch(Box::new(base))).unwrap();
+        let mut buf = vec![0.0f32; block * 2];
+        eng.process_audio(&mut buf, 2);
+        let mut out: Vec<f32> = Vec::new();
+        for (i, &n) in melody.iter().enumerate() {
+            let arch = (i as f32 / (melody.len() - 1) as f32 * std::f32::consts::PI).sin();
+            let vel = (30.0 + 97.0 * arch) as u8;
+            tx.send(ArchetCommand::NoteOn(n, vel)).unwrap();
+            for step in 0..(0.9 * sr) as usize / block {
+                if step == (0.75 * sr) as usize / block {
+                    tx.send(ArchetCommand::NoteOff(n)).unwrap();
+                }
+                buf.fill(0.0);
+                eng.process_audio(&mut buf, 2);
+                for k in 0..block { out.push(buf[k * 2]); }
+            }
+        }
+        write_wav("swell.wav", &out, sr);
     }
 
     /// A melody across the violin's range on the solo patch, rendered once
@@ -3190,7 +3221,7 @@ mod golden_audio {
         }
         let h = crate::fingerprint::of(&left);
         eprintln!("GOLDEN = {h:#018x}");
-        assert_eq!(h, 0x5f37fa6e3969f3c7, "the engine's rendered audio changed");
+        assert_eq!(h, 0xc1dda444889d5294, "the engine's rendered audio changed");
     }
 }
 
