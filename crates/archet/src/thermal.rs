@@ -33,6 +33,11 @@ const K_BOW: f64 = 0.2;
 const LAMBDA_STRING: f64 = 2050.0;
 const LAMBDA_BOW: f64 = 450.0;
 
+/// Hairs of a violin bow in contact with the string: 150 to 200 are mounted
+/// on a bow. Each is a contact of its own carrying its share of the load,
+/// and the contact temperature is that of one hair's patch.
+pub const HAIRS: f64 = 175.0;
+
 /// The memories' time constants: from one sample to about a second, three
 /// to the decade.
 const MEMORIES: usize = 15;

@@ -107,6 +107,15 @@ impl ModalString {
         });
     }
 
+    /// Move the thermal law onto another string without cooling the
+    /// contact: a slur or a bow change keeps the bow on the string.
+    pub fn retune_thermal(&mut self, z: f32) {
+        let b00 = self.b00;
+        if let Some((_, kv, kf)) = self.thermal.as_mut() {
+            *kf = 2.0 * z as f64 * *kv * b00;
+        }
+    }
+
     fn rand(&mut self) -> f32 {
         self.rng ^= self.rng << 13;
         self.rng ^= self.rng >> 17;
@@ -409,7 +418,8 @@ impl ModalString {
                     self.slipping = true;
                 }
                 let slide = (vb - v0h - f0 * self.b00).abs() * *kv;
-                th.step(f0.abs() * *kf * slide, slide, fb * *kf);
+                let hairs = crate::thermal::HAIRS;
+                th.step(f0.abs() * *kf * slide / hairs, slide, fb * *kf / hairs);
             }
         } else if fb <= 0.0 {
             // bow fully lifted / free-ringing pluck: exactly force-free (the slip
@@ -650,13 +660,13 @@ mod thermal_audit {
         let sr = 48_000.0f32;
         let f0 = 466.16f32;
         for law in ["hyper", "thermal"] {
-            for (name, press, speed) in [("pp", 3.0f32, 0.016f32), ("mf", 5.0, 0.06), ("ff", 7.0, 0.19)] {
+            for (name, press, speed) in [("pp", 3.0f32, 0.016f32), ("mf", 5.0, 0.06), ("ff", 7.0, 0.19), ("mf2", 2.5, 0.06), ("mf3", 9.0, 0.06), ("mf4", 14.0, 0.06)] {
                 let mut m = ModalString::new(sr);
                 m.set_voice(f0, 1.6, 0.045 * (1.0 + (f0 / 750.0).powi(2)), 2.0e-5, 0.075);
                 m.noise_amt = 0.0;
                 m.reset();
                 if law == "thermal" {
-                    m.set_thermal(true, 1.0, 0.35);
+                    m.set_thermal(true, 5.0, 0.195);
                 }
                 let fb = press * m.impedance();
                 let mut out = Vec::new();

@@ -750,7 +750,7 @@ mod preset_sweep_tests {
             left.extend(buf.iter().step_by(2));
         }
         let h = crate::fingerprint::of(&left);
-        const GOLDEN: u64 = 0xa161263dfaf2992c; // the ensemble render, note-offs included
+        const GOLDEN: u64 = 0xbe4fb1c1572b6369; // the ensemble render, note-offs included
         assert_eq!(h, GOLDEN, "Archet ensemble render drifted from golden (hash {h:#018x})");
     }
 }
@@ -2363,6 +2363,35 @@ mod profile {
         }
     }
 
+    /// B flat 4 and its neighbours at three dynamics, no vibrato, for the
+    /// centroid's change with dynamics: dyn_<note>_<velocity>.wav.
+    #[test]
+    #[ignore = "diagnostic - run with --ignored"]
+    fn dyn_notes() {
+        let sr = 48_000.0_f32;
+        let block = 512usize;
+        let bank = crate::patch::ArchetPatch::factory_presets();
+        let preset = bank.iter().find(|p| p.name == "Violin Solo").unwrap();
+        for note in [69u8, 70, 71] {
+            for vel in [34u8, 80, 127] {
+                let (mut eng, tx, _mr) = ArchetEngine::new_for_plugin(sr);
+                let mut p = preset.clone();
+                p.vib_depth = 0.0;
+                tx.send(ArchetCommand::LoadPatch(Box::new(p))).unwrap();
+                let mut buf = vec![0.0f32; block * 2];
+                eng.process_audio(&mut buf, 2);
+                tx.send(ArchetCommand::NoteOn(note, vel)).unwrap();
+                let mut out: Vec<f32> = Vec::new();
+                for _ in 0..(4.0 * sr) as usize / block {
+                    buf.fill(0.0);
+                    eng.process_audio(&mut buf, 2);
+                    for k in 0..block { out.push(buf[k * 2]); }
+                }
+                write_wav(&format!("dyn_{note}_{vel}.wav"), &out, sr);
+            }
+        }
+    }
+
     /// A melody across the violin's range on the solo patch, rendered once
     /// per variant of the patch, into variant_<name>.wav in ARCHET_RENDER_DIR,
     /// for listening to what a control changes.
@@ -3161,7 +3190,7 @@ mod golden_audio {
         }
         let h = crate::fingerprint::of(&left);
         eprintln!("GOLDEN = {h:#018x}");
-        assert_eq!(h, 0xcfdf0c98f3eec382, "the engine's rendered audio changed");
+        assert_eq!(h, 0x5f37fa6e3969f3c7, "the engine's rendered audio changed");
     }
 }
 

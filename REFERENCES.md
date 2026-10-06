@@ -13,7 +13,13 @@ Bowed string
 - J. Woodhouse, Bowed string simulation using a thermal friction model,
   Acta Acustica 89, 2003 (equation 1, Table I and the steady-sliding
   friction curve, equation 2): the bowed string's friction law, the
-  contact temperature of the rosin driving the coefficient.
+  contact temperature of the rosin driving the coefficient. The contact
+  is one hair's patch of the 150 to 200 on a bow, each with its share of
+  the load, and the conduction into bow and string is the half-derivative
+  plus the steady constriction conductance of a contact of that radius.
+- Knut's Acoustics, Typical properties of bowed strings (after D'Addario
+  and Corelli): the transverse impedance of each open string of the
+  violin, viola, cello and double bass.
 - Friedlander; McIntyre, Schumacher and Woodhouse: the graphical solution
   of the friction interaction.
 - J. C. Schelleng, The bowed string and the player, JASA 1973: the window

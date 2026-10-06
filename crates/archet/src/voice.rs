@@ -50,8 +50,9 @@ impl Noise {
 /// Helmholtz motion takes to establish at a mezzo-forte.
 const ATTACK_QUICK: f32 = 0.1;
 
-/// Metres per second per unit of the string model's bow velocity.
-const THERMAL_SPEED: f32 = 1.0;
+/// Metres per second per unit of the string model's bow velocity: the
+/// loudest bow of the model, 0.19, is a metre per second.
+const THERMAL_SPEED: f32 = 5.0;
 
 const PRESS_SOFT: f32 = 3.0;
 const PRESS_LOUD: f32 = 7.0;
@@ -62,7 +63,7 @@ const PRESS_LOUD: f32 = 7.0;
 /// full velocity must peak where the engine's norm puts the largest
 /// section's reference chord at full scale. The plugin's bank guard
 /// measures it on the loudest factory preset.
-const BOW_LEVEL: f32 = 0.72;
+const BOW_LEVEL: f32 = 0.62;
 
 /// How the bowed bridge force's level follows the bow's distance from the
 /// bridge, as the exponent of that distance: the rms of a sixteen-note
@@ -669,14 +670,18 @@ impl ArchetVoice {
     /// power of five notes spanning the instrument's own register, at one
     /// velocity, to the violin's; engine::profile::inst_balance measures
     /// it and prints the figure that would hold.
-    /// The transverse impedance of the bowed string, N s/m, per instrument.
-    fn string_impedance(idx: usize) -> f32 {
-        match idx {
-            0 => 0.35,
-            1 => 0.45,
-            2 => 0.8,
-            _ => 1.5,
-        }
+    /// The transverse impedance of a bowed string, N s/m: the middle of the
+    /// range D'Addario and Corelli give for each open string of the family
+    /// (violin G D A E, viola C G D A, cello C G D A, bass E A D G in
+    /// orchestra tuning).
+    fn string_impedance(body_index: usize, string: usize) -> f32 {
+        const Z: [[f32; 4]; 4] = [
+            [0.335, 0.185, 0.195, 0.19],
+            [0.55, 0.37, 0.25, 0.245],
+            [1.41, 0.94, 0.66, 0.52],
+            [3.56, 2.58, 1.87, 1.37],
+        ];
+        Z[body_index.min(3)][string.min(3)]
     }
     pub(crate) fn inst_level(idx: usize) -> f32 {
         match idx {
@@ -972,7 +977,8 @@ impl ArchetVoice {
             self.modal.noise_amt = match self.inst_idx { 0 => 0.12, 1 => 0.05, _ => 0.02 };
             self.modal.set_voice(self.freq_hz, b1, b2, stiff, beta);
             self.modal.reset(); // fresh bow stroke: silent string, perfect-start bow catches it
-            self.modal.set_thermal(true, THERMAL_SPEED, Self::string_impedance(self.inst_idx));
+            let string = Self::string_for(self.inst_idx, note).0;
+            self.modal.set_thermal(true, THERMAL_SPEED, Self::string_impedance(self.inst_idx, string));
         }
 
         self.vib_cycle_rate = 1.0;
@@ -1018,6 +1024,8 @@ impl ArchetVoice {
         // glide target (ramped in process), on this player's seat detune
         self.freq_target = Self::freq_tuned(note, patch) * 2f32.powf(self.unison_det / 1200.0);
         self.modal_pitch_gain = Self::modal_pgain(self.freq_target) * Self::inst_level(self.inst_idx);
+        let string = Self::string_for(self.inst_idx, note).0;
+        self.modal.retune_thermal(Self::string_impedance(self.inst_idx, string));
     }
 
     /// A detache bow change: the bow stays in contact and reverses; the
@@ -1045,6 +1053,8 @@ impl ArchetVoice {
             let (b1, b2, beta) = (b1 * self.string_damping, b2 * self.string_damping, self.bow_beta);
             self.modal.set_voice(self.freq_hz, b1, b2, stiff, beta);
             self.modal.soften(0.5); // the reversal re-forms the corner; shed stale energy
+            let string = Self::string_for(self.inst_idx, note).0;
+            self.modal.retune_thermal(Self::string_impedance(self.inst_idx, string));
         }
     }
 
