@@ -10,6 +10,10 @@ Bowed string
 - M. Demoucron, On the control of virtual violins, thesis, IRCAM / KTH,
   2008: the modal string with a one-point friction interaction and the
   bridge-force output.
+- J. Woodhouse, Bowed string simulation using a thermal friction model,
+  Acta Acustica 89, 2003 (equation 1, Table I and the steady-sliding
+  friction curve, equation 2): the bowed string's friction law, the
+  contact temperature of the rosin driving the coefficient.
 - Friedlander; McIntyre, Schumacher and Woodhouse: the graphical solution
   of the friction interaction.
 - J. C. Schelleng, The bowed string and the player, JASA 1973: the window
