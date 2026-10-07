@@ -169,7 +169,7 @@ impl Bank {
 /// of the bowed open strings at mf. The output is the parallel sum of the
 /// resonators, the modal admittance.
 const SIG_VIOLIN: &[(f32, f32, f32)] = &[
-    (275.0, 10.0, 10.0),  // A0  main air (monopole)
+    (290.0, 10.0, 3.0),  // A0  main air (monopole)
     (405.0, 14.0, -3.0),  // CBR
     (460.0, 16.0, 4.0),   // B1-
     (485.0, 25.0, -8.0),  // A1
@@ -623,6 +623,6 @@ mod shared_filter_migration {
         let sig = probe();
         let mut body = ModalBody::new(48_000.0, 0, 1.0, 6.0); // violin body
         let o: Vec<f32> = sig.iter().map(|&x| body.process(x)).collect();
-        assert_eq!(crate::fingerprint::of(&o), 7455991597594355845, "archet ModalBody drifted");
+        assert_eq!(crate::fingerprint::of(&o), 16973474043433549825, "archet ModalBody drifted");
     }
 }

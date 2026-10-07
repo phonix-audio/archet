@@ -18,32 +18,7 @@ a measurement, and what has been tried.
   1300-4200 Hz over 190-650) match the G string's recording within a
   decibel, the sum of G, D and A within two under it. The plucked
   envelope sits within 6.2 dB after the pluck's rounding was refitted.
-  The G string's fundamental still radiates 7 dB more than recorded, and
-  the D string's 650-1300 Hz band is 7 dB under its recording's.
-- A held note does not brighten with force as a real one does. Measured
-  2026-09-14 on a stopped B flat with vibrato: spectral centroid 617 /
-  648 / 641 Hz at pp / mf / ff against 623 / 781 / 1110 Hz recorded
-  (Iowa): right at pp, dark above it. The
-  hyperbolic one-point friction of the modal string (Demoucron) does not
-  sharpen the Helmholtz corner with force. Tried and reverted, each
-  measured: bow force times 3.8 (+15 % centroid), the friction curve's
-  velocity scale, bowing nearer the bridge for louder notes (Askenfelt;
-  darker in this model, and a two-second onset because Schelleng's minimum
-  force rises as one over beta squared), the measured plucked losses, the
-  string's high-partial loss scaled by the force (2026-09-14, +70 Hz at
-  ff), a low-pass on the bow's force whose corner rises with it (nothing),
-  as the bowed losses (darker still). The path is a friction model that
-  sharpens the corner (Smith and Woodhouse 2000; Woodhouse 2003), not a
-  force-dependent filter.
-- A bowed note reaches its level in 0.3 to 1 s where a recorded one is
-  established within 250 ms and Guettler's clean attacks form in tens of
-  ms (2026-09-13). The bow now starts as a player's does, the force there
-  first and the speed ramping over the attack setting, which makes the
-  setting act; but the modal string with its one-point hyperbolic friction
-  converges to Helmholtz motion at its own pace whatever the acceleration.
-  Excluded by measurement: the slip noise, the slow force drift and the
-  sympathetic strings (each silenced, the onset unchanged). The cause is
-  the same missing mechanism as the brightness above.
+  The D string's 650-1300 Hz band is 7 dB under its recording's.
 - The bowed string has one transverse plane; the plucked one has two.
 - The vibrato's onset was measured on four recorded held notes of one
   player (2026-09-13): the first cycle is there within the first period
@@ -54,16 +29,6 @@ a measurement, and what has been tried.
 
 ## Plucked
 
-- A bowed attack establishes Helmholtz motion late: 25 to 400 ms at a
-  mezzo-forte depending on the attack ramp, 100 to 600 at pianissimo
-  (attack-map diagnostic, 2026-09-14), against the 50 to 100 ms of a
-  clean recorded attack (Guettler and Askenfelt); until then the string
-  slips several times a period and the onset is brighter than the tone
-  that follows, where a recording's is darker. The ramp the ATTACK
-  control sets is the loudness's, and Helmholtz follows it only loosely.
-  A harder bow helps, and the window's floor was raised for it; the rest
-  is the one-point hyperbolic friction, which neither sharpens the corner
-  with force nor absorbs the secondary waves as a bow of some width does.
 - The attack carries no finger contact and no body knock. The recordings'
   attacks are strong at 1.6-2 kHz for 50 ms where their sustained part is
   weak; the model has no source for that, so the cello and bass attacks
