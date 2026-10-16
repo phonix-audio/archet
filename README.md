@@ -25,9 +25,9 @@ and damping of the stroke. The body: which of the four, its response with
 the bridge hill drawn, and the torsion under it. The player: attack and
 release, the vibrato, the dynamics, how the keys phrase, the size of the
 section, the polyphony, the level.
-The keyboard below plays it, and underlines the notes the instrument
-plays: outside them the model is asked for a note the real instrument
-has no string for.
+The notes the instrument plays are the compass of the chosen instrument:
+outside them the model is asked for a note the real instrument has no
+string for.
 
 ![The editor, bowing](docs/screenshots/archet_arco.png)
 

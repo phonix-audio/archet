@@ -807,7 +807,7 @@ mod frozen_identifiers {
     fn the_declared_window_size_is_the_editors_own() {
         let p = ArchetParams::new(0, Arc::new(vec!["Init".to_string()]));
         assert_eq!(p.editor_state.size(), (archet_app::W as u32, archet_app::H as u32));
-        assert_eq!((archet_app::W, archet_app::H), (1160.0, 770.0));
+        assert_eq!((archet_app::W, archet_app::H), (1160.0, 666.0));
     }
 }
 

@@ -1,4 +1,4 @@
-//! The editor: the machine under the shared chrome, the keyboard below.
+//! The editor: the machine under the shared chrome.
 //!
 //! Laid out in fixed rectangles rather than egui containers. The composition
 //! is a drawing -- a bow crossing a string, the corpus it drives, the player
@@ -13,7 +13,6 @@ use archet::{ArchetCommand, ArchetMeterState};
 use phonix_plugin::preset::Preset;
 use phonix_rt::SharedReader;
 use phonix_ui::chrome::{plugin_chrome_panel, PillEntry, PluginChrome};
-use phonix_ui::keyboard::{keyboard_ui, KeyEvent, KeyboardState, KeyboardStyle, BEND_SEMITONES};
 use phonix_ui::preset_picker::{NamedPreset, PresetPickerState};
 use phonix_ui::widgets;
 
@@ -24,12 +23,11 @@ use crate::theme;
 
 /// The size the layout is drawn for. The window is fixed at this.
 pub const W: f32 = 1160.0;
-pub const H: f32 = 770.0;
-/// The panel's height inside the case, the chrome above and the keyboard
-/// below taken off. The head band went with the nameplate: the name and
-/// what the instrument is are in the shared header now.
+pub const H: f32 = 666.0;
+/// The panel's height inside the case, the chrome above taken off. The head
+/// band went with the nameplate: the name and what the instrument is are in
+/// the shared header now.
 pub const PANEL_H: f32 = 602.0;
-const KEYBOARD_H: f32 = 104.0;
 
 /// The four bodies, in the engine's own order.
 const BODIES: [&str; 4] = ["VIOLIN", "VIOLA", "CELLO", "BASS"];
@@ -47,7 +45,6 @@ pub struct ArchetApp {
     /// The named fields moved in the window since the plugin last asked,
     /// for the host's parameters to follow.
     moved: Vec<(ArchetParam, f32)>,
-    keys: KeyboardState,
     /// Frames left before the editor will adopt the engine's patch again.
     sync_cooldown: u8,
     mirror_hold: u8,
@@ -74,7 +71,6 @@ impl ArchetApp {
             picker: PresetPickerState::default(),
             wants_preset: None,
             moved: Vec::new(),
-            keys: KeyboardState::new(2, 4),
             sync_cooldown: 0,
             mirror_hold: 0,
             tab: 0,
@@ -209,7 +205,6 @@ impl ArchetApp {
         ctx.request_repaint_after(std::time::Duration::from_millis(33));
 
         self.draw_chrome(ui);
-        self.draw_keyboard(ui);
 
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(PANEL_EDGE))
@@ -283,39 +278,6 @@ impl ArchetApp {
                 self.send(ArchetCommand::LoadPatch(Box::new(p)));
             }
         }
-    }
-
-    /// Notes go out on the raw sender, never through `send`: a note is not a
-    /// parameter edit, and arming the mirror cooldown on every key would keep
-    /// the editor from adopting the engine's patch while playing.
-    fn draw_keyboard(&mut self, ui: &mut Ui) {
-        egui::Panel::bottom("archet_keys")
-            .exact_size(KEYBOARD_H)
-            .frame(egui::Frame::NONE.fill(PANEL_EDGE).inner_margin(egui::Margin::symmetric(10i8, 4i8)))
-            .show_inside(ui, |ui| {
-                self.keys.active.clear();
-                self.keys.active.extend_from_slice(&self.cached_meter.active_notes);
-                let style = KeyboardStyle {
-                    accent: ROSIN,
-                    height: 64.0,
-                    labels: true,
-                    velocity: 100,
-                    velocity_by_y: true,
-                    header: true,
-                    wheels: true,
-                    id_salt: "archet_kbd",
-                    range: Some(self.patch.range()),
-                };
-                for ev in keyboard_ui(ui, &mut self.keys, &style) {
-                    let cmd = match ev {
-                        KeyEvent::On { note, velocity } => ArchetCommand::NoteOn(note, velocity),
-                        KeyEvent::Off { note } => ArchetCommand::NoteOff(note),
-                        KeyEvent::PitchBend(v) => ArchetCommand::PitchBend(v * BEND_SEMITONES),
-                        KeyEvent::ModWheel(v) => ArchetCommand::ModWheel(v),
-                    };
-                    let _ = self.tx.send(cmd);
-                }
-            });
     }
 
     // -- Tier one: the bow on the string -------------------------------
@@ -546,13 +508,13 @@ mod tests {
     }
 
     // The panel and the keyboard fit the window, with room for the chrome.
-    const _: () = assert!(PANEL_H + KEYBOARD_H < H);
-    const _: () = assert!(H - PANEL_H - KEYBOARD_H >= 40.0);
+    const _: () = assert!(PANEL_H < H);
+    const _: () = assert!(H - PANEL_H >= 40.0);
 
-    /// The window is exactly the chrome, the panel and the keyboard.
+    /// The window is exactly the chrome and the panel.
     #[test]
     fn the_window_holds_what_it_draws() {
-        assert_eq!((W, H), (1160.0, 770.0));
+        assert_eq!((W, H), (1160.0, 666.0));
     }
 
     #[test]
