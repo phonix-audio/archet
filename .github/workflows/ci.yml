@@ -1,15 +1,13 @@
-# Builds, tests and bundles the plugin on Linux and Windows, and hands the pair
-# out as a rolling `nightly` prerelease. There are no version tags and no
-# versioned releases: what is published is the head of main, built. Nothing
-# here needs a secret: every crate the plugin builds from is in this repository
-# or on crates.io.
+# Builds, tests and bundles the plugin on Linux and Windows when a version tag
+# is pushed, and publishes the pair as the release of that tag, with the
+# changelog section of the version as its notes. Nothing runs on a push to a
+# branch or on a pull request. Nothing here needs a secret: every crate the
+# plugin builds from is in this repository or on crates.io.
 name: ci
 
 on:
   push:
-    branches: [main]
-  pull_request:
-  workflow_dispatch:
+    tags: ['v*']
 
 permissions:
   contents: write
@@ -77,10 +75,7 @@ jobs:
           name: ${{ matrix.platform }}
           path: dist/*.zip
 
-  nightly:
-    # Main only, and never a pull request: a fork must not be able to move what
-    # the nightly link hands people.
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+  release:
     needs: build
     runs-on: ubuntu-latest
     steps:
@@ -90,18 +85,15 @@ jobs:
           path: dist
           merge-multiple: true
 
-      # One rolling prerelease, moved to the commit it was built from, so the
-      # download link never changes and never names a version that does not
-      # exist. Deleted and recreated rather than edited: `gh release upload
-      # --clobber` leaves an asset behind when a platform's name changes.
-      - name: Publish the nightly
+      # The notes are the changelog section of the tagged version.
+      - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release delete nightly --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes || true
-          gh release create nightly dist/*.zip \
+          version="${GITHUB_REF_NAME#v}"
+          awk -v v="$version" '/^## \[/ { on = index($0, "[" v "]") > 0; next } on' CHANGELOG.md > notes.md
+          gh release create "$GITHUB_REF_NAME" dist/*.zip \
             --repo "$GITHUB_REPOSITORY" \
-            --title "nightly" \
-            --prerelease \
-            --target "$GITHUB_SHA" \
-            --notes "The head of main, bundled on $(date -u +%Y-%m-%d) from ${GITHUB_SHA:0:7}. Unsigned, and not a release."
+            --title "$GITHUB_REF_NAME" \
+            --verify-tag \
+            --notes-file notes.md
